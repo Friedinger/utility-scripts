@@ -1,0 +1,146 @@
+<#
+.SYNOPSIS
+  Brings all Git repos under a root folder up to date with their default branch.
+
+.DESCRIPTION
+  For each subfolder containing .git:
+    - git fetch --prune
+    - detects the repo's actual default branch (via origin/HEAD, not a hardcoded main/master guess)
+    - skips repos with uncommitted changes (nothing is ever overwritten)
+    - checks out the default branch (only if clean) and pulls via --ff-only
+    - deletes local branches that are already fully merged into the default branch
+    - reports repos with no default branch detected or with diverged history
+    - optionally runs npm install for repos with a package.json, but only when
+      the repo was actually updated or node_modules is missing
+
+.PARAMETER Root
+  Folder containing the project folders. Default: current folder.
+
+.PARAMETER InstallDeps
+  Also run npm install (npm ci if a package-lock.json is present) after a repo
+  is updated, so node_modules matches the newly pulled package.json/lockfile.
+
+.EXAMPLE
+  sync-repos.ps1
+  sync-repos.ps1 C:\Projects -InstallDeps
+#>
+
+param(
+    [string]$Root = (Get-Location).Path,
+    [switch]$InstallDeps
+)
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+function Get-DefaultBranch {
+    $ref = git symbolic-ref refs/remotes/origin/HEAD 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $ref) {
+        git remote set-head origin -a --quiet 2>$null
+        $ref = git symbolic-ref refs/remotes/origin/HEAD 2>$null
+    }
+    if ($LASTEXITCODE -eq 0 -and $ref) {
+        return ($ref -replace '^refs/remotes/origin/', '')
+    }
+
+    foreach ($candidate in @("main", "master")) {
+        git show-ref --verify --quiet "refs/heads/$candidate" 2>$null
+        if ($LASTEXITCODE -eq 0) { return $candidate }
+    }
+    return $null
+}
+
+$dirs = Get-ChildItem -Path $Root -Directory
+
+foreach ($d in $dirs) {
+    $name = $d.Name
+    $path = $d.FullName
+    $gitDir = Join-Path $path ".git"
+
+    if (-not (Test-Path $gitDir)) {
+        Write-Host "[$name] skipped (not a git repo)" -ForegroundColor DarkGray
+        continue
+    }
+
+    Push-Location $path
+    try {
+        git fetch --quiet --prune 2>$null
+
+        $branch = git rev-parse --abbrev-ref HEAD 2>$null
+        $status = git status --porcelain 2>$null
+
+        $defaultBranch = Get-DefaultBranch
+
+        if (-not $defaultBranch) {
+            Write-Host "[$name] no default branch detected (currently on '$branch')" -ForegroundColor Yellow
+            continue
+        }
+
+        if ($status) {
+            Write-Host "[$name] SKIPPED: uncommitted changes on '$branch'" -ForegroundColor Yellow
+            continue
+        }
+
+        if ($branch -ne $defaultBranch) {
+            git checkout $defaultBranch --quiet 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[$name] failed to check out '$defaultBranch'" -ForegroundColor Red
+                continue
+            }
+            Write-Host "[$name] switched from '$branch' to '$defaultBranch'" -ForegroundColor Cyan
+        }
+
+        $before = git rev-parse HEAD
+        git pull --ff-only --quiet 2>$null
+        $pullExit = $LASTEXITCODE
+        $after = git rev-parse HEAD
+        $wasUpdated = $false
+
+        if ($pullExit -ne 0) {
+            Write-Host "[$name] PULL FAILED on '$defaultBranch' (diverged? -> check manually)" -ForegroundColor Red
+        }
+        elseif ($before -ne $after) {
+            Write-Host "[$name] updated: $($before.Substring(0,7)) -> $($after.Substring(0,7))" -ForegroundColor Green
+            $wasUpdated = $true
+        }
+        else {
+            Write-Host "[$name] already up to date on '$defaultBranch'" -ForegroundColor DarkGray
+        }
+
+        if ($InstallDeps -and (Test-Path (Join-Path $path "package.json"))) {
+            $nodeModulesMissing = -not (Test-Path (Join-Path $path "node_modules"))
+            if ($wasUpdated -or $nodeModulesMissing) {
+                if (Test-Path (Join-Path $path "package-lock.json")) {
+                    Write-Host "[$name] running npm ci..." -ForegroundColor Cyan
+                    npm ci --silent 2>$null | Out-Null
+                }
+                else {
+                    Write-Host "[$name] running npm install..." -ForegroundColor Cyan
+                    npm install --silent 2>$null | Out-Null
+                }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "[$name] npm install FAILED" -ForegroundColor Red
+                }
+                else {
+                    Write-Host "[$name] dependencies installed" -ForegroundColor Green
+                }
+            }
+        }
+
+        $mergedBranches = git branch --merged $defaultBranch 2>$null |
+            ForEach-Object { $_.Trim().TrimStart('* ').Trim() } |
+            Where-Object { $_ -and $_ -ne $defaultBranch }
+
+        foreach ($b in $mergedBranches) {
+            git branch -d $b --quiet 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[$name] deleted merged branch '$b'" -ForegroundColor DarkCyan
+            }
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+Write-Host ""
+Write-Host "Done." -ForegroundColor White
