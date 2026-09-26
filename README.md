@@ -3,7 +3,7 @@
 Small utility scripts for the gaps my usual tools leave behind. Mostly
 PowerShell, one topic per subfolder.
 
-## tracked-configs
+## mise-tracked-configs
 
 `remove-mise-tracked.ps1` removes an entry from mise's tracked-configs cache.
 
