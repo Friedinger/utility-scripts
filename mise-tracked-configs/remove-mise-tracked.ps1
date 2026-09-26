@@ -1,3 +1,35 @@
+<#
+.SYNOPSIS
+  Removes an entry from mise's tracked-configs cache.
+
+.DESCRIPTION
+  mise remembers every config file it has ever seen, in every directory you
+  have been in. Entries for archived or deleted projects therefore stick
+  around and keep showing up in `mise ls --all-sources`. `mise trust` /
+  `mise untrust` do not help here — they manage a different list
+  (trusted-configs), and mise ships no command for removing tracked entries
+  at all. This script deletes the entry directly from mise's state directory.
+
+  With no -Path, lists all tracked configs and asks which one to remove.
+  With -Path, removes that one directly, still asking to confirm unless
+  -Force is also given. Matching is exact, but case-insensitive.
+
+.PARAMETER Path
+  The tracked config path to remove. Omit for the interactive picker.
+
+.PARAMETER Force
+  Skip the confirmation prompt. Requires -Path. Alias: -y.
+
+.PARAMETER StateDir
+  Override the tracked-configs directory instead of asking `mise doctor`
+  for it. Mainly useful for testing.
+
+.EXAMPLE
+  remove-mise-tracked.ps1
+  remove-mise-tracked.ps1 'C:\path\to\mise.toml'
+  remove-mise-tracked.ps1 'C:\path\to\mise.toml' -y
+#>
+
 param(
     [Parameter(Position = 0)]
     [string]$Path,
