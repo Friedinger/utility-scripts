@@ -16,7 +16,7 @@ command for removing tracked entries at all. This script deletes the entry.
 ### Requirements
 
 - [mise](https://mise.jdx.dev) on `PATH`
-- PowerShell 7 (`pwsh`)
+- PowerShell 5.1 (`powershell`) or 7 (`pwsh`)
 
 ### Usage
 
