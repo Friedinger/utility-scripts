@@ -17,17 +17,21 @@
   Folder containing the project folders. Default: current folder.
 
 .PARAMETER InstallDeps
-  Also run npm install (npm ci if a package-lock.json is present) after a repo
+  Controls npm install (npm ci if a package-lock.json is present) after a repo
   is updated, so node_modules matches the newly pulled package.json/lockfile.
+  Omitted: ask per repo whenever an install would be relevant.
+  $true: always install for every relevant repo, no prompts.
+  $false: never install, no prompts.
 
 .EXAMPLE
   sync-repos.ps1
-  sync-repos.ps1 C:\Projects -InstallDeps
+  sync-repos.ps1 C:\Projects -InstallDeps:$true
+  sync-repos.ps1 C:\Projects -InstallDeps:$false
 #>
 
 param(
     [string]$Root = (Get-Location).Path,
-    [switch]$InstallDeps
+    [Nullable[bool]]$InstallDeps = $null
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -47,6 +51,47 @@ function Get-DefaultBranch {
         if ($LASTEXITCODE -eq 0) { return $candidate }
     }
     return $null
+}
+
+function Install-Dependencies {
+    param(
+        [string]$Name,
+        [string]$Path,
+        [bool]$WasUpdated,
+        [Nullable[bool]]$InstallDeps
+    )
+
+    if (-not (Test-Path (Join-Path $Path "package.json"))) { return }
+
+    $nodeModulesMissing = -not (Test-Path (Join-Path $Path "node_modules"))
+    if (-not $WasUpdated -and -not $nodeModulesMissing) { return }
+
+    $shouldInstall = $InstallDeps
+    if ($null -eq $shouldInstall) {
+        $answer = Read-Host "[$Name] run npm install? (y/N)"
+        $shouldInstall = $answer -match '^(y|yes)$'
+    }
+
+    if (-not $shouldInstall) {
+        Write-Host "[$Name] npm install skipped" -ForegroundColor DarkGray
+        return
+    }
+
+    if (Test-Path (Join-Path $Path "package-lock.json")) {
+        Write-Host "[$Name] running npm ci..." -ForegroundColor Cyan
+        npm ci --silent 2>$null | Out-Null
+    }
+    else {
+        Write-Host "[$Name] running npm install..." -ForegroundColor Cyan
+        npm install --silent 2>$null | Out-Null
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[$Name] npm install FAILED" -ForegroundColor Red
+    }
+    else {
+        Write-Host "[$Name] dependencies installed" -ForegroundColor Green
+    }
 }
 
 $dirs = Get-ChildItem -Path $Root -Directory
@@ -106,25 +151,7 @@ foreach ($d in $dirs) {
             Write-Host "[$name] already up to date on '$defaultBranch'" -ForegroundColor DarkGray
         }
 
-        if ($InstallDeps -and (Test-Path (Join-Path $path "package.json"))) {
-            $nodeModulesMissing = -not (Test-Path (Join-Path $path "node_modules"))
-            if ($wasUpdated -or $nodeModulesMissing) {
-                if (Test-Path (Join-Path $path "package-lock.json")) {
-                    Write-Host "[$name] running npm ci..." -ForegroundColor Cyan
-                    npm ci --silent 2>$null | Out-Null
-                }
-                else {
-                    Write-Host "[$name] running npm install..." -ForegroundColor Cyan
-                    npm install --silent 2>$null | Out-Null
-                }
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "[$name] npm install FAILED" -ForegroundColor Red
-                }
-                else {
-                    Write-Host "[$name] dependencies installed" -ForegroundColor Green
-                }
-            }
-        }
+        Install-Dependencies -Name $name -Path $path -WasUpdated $wasUpdated -InstallDeps $InstallDeps
 
         $mergedBranches = git branch --merged $defaultBranch 2>$null |
             ForEach-Object { $_.Trim().TrimStart('* ').Trim() } |
