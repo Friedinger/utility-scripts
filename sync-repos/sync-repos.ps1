@@ -109,6 +109,10 @@ foreach ($d in $dirs) {
     Push-Location $path
     try {
         git fetch --quiet --prune 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[$name] git fetch FAILED (offline? auth issue?)" -ForegroundColor Red
+            continue
+        }
 
         $branch = git rev-parse --abbrev-ref HEAD 2>$null
         $status = git status --porcelain 2>$null
