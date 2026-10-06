@@ -25,9 +25,9 @@
   $false: never install, no prompts.
 
 .EXAMPLE
-  sync-repos.ps1
-  sync-repos.ps1 C:\Projects -InstallDeps:$true
-  sync-repos.ps1 C:\Projects -InstallDeps:$false
+  Sync-GitRepos.ps1
+  Sync-GitRepos.ps1 C:\Projects -InstallDeps:$true
+  Sync-GitRepos.ps1 C:\Projects -InstallDeps:$false
 #>
 
 param(

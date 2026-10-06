@@ -25,9 +25,9 @@
   for it. Mainly useful for testing.
 
 .EXAMPLE
-  remove-mise-tracked.ps1
-  remove-mise-tracked.ps1 'C:\path\to\mise.toml'
-  remove-mise-tracked.ps1 'C:\path\to\mise.toml' -y
+  Remove-MiseTrackedConfig.ps1
+  Remove-MiseTrackedConfig.ps1 'C:\path\to\mise.toml'
+  Remove-MiseTrackedConfig.ps1 'C:\path\to\mise.toml' -y
 #>
 
 param(
