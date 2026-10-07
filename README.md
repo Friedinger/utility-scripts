@@ -44,11 +44,17 @@ is only useful for projects you are done with.
 `Sync-GitRepos.ps1` keeps every project folder on its default branch and up to
 date.
 
-For every Git repo directly under a root folder, it fetches, detects the
+For every Git repo under a root folder (searched recursively, not descending
+into repos, `node_modules` or hidden folders), it fetches, detects the
 repo's actual default branch (via `origin/HEAD`, works for `main`, `master` or
 anything else), fast-forwards it, deletes local branches already merged into
 it, and optionally runs `npm install`/`npm ci`. Repos with uncommitted changes
 are left untouched.
+
+Works inside OneDrive: repos whose `.git` folder is not fully available
+locally (and online-only folders) are silently skipped, so nothing gets
+downloaded for them. `npm install` is only offered when a repo was updated and
+already had `node_modules`.
 
 ### Requirements
 
@@ -63,6 +69,9 @@ are left untouched.
 
 # syncs a specific folder, and npm install/ci where a repo was updated
 .\Sync-GitRepos.ps1 C:\Projects -InstallDeps
+
+# only look two folder levels deep
+.\Sync-GitRepos.ps1 C:\Projects -MaxDepth 2
 ```
 
 Double-click `Sync-GitRepos.cmd` for the same, defaulting to the folder it's
