@@ -7,6 +7,8 @@
     Up/Down, PgUp/PgDn, Home/End   move
     Space                          mark / unmark the current item
     a                              mark all items matching the filter (or unmark them if all are marked)
+    g                              switch between list and folder tree (only with -Tree)
+    Left/Right                     tree: collapse / expand the folder (Left on an entry: jump to its folder)
     n                              unmark everything
     d                              mark all matching flagged items (only with -Flag)
     f, /                           live filter, Enter or Esc leaves the filter input
@@ -28,6 +30,12 @@
 
 .PARAMETER FlagLabel
   Name of the flagged group, used in the help line and status line.
+
+.PARAMETER Tree
+  Treat the items as paths and allow g to show them as a folder tree instead
+  of a flat list. Folders that only contain one folder are shown as one row
+  (C:\Users\me\src), Space on a folder marks everything below it, and a
+  folder is red when everything below it is flagged.
 
 .PARAMETER Preview
   Optional scriptblock that receives the item under the cursor and returns up
@@ -52,7 +60,9 @@ function Select-ConsoleItem {
 
         [string]$FlagLabel = 'flagged',
 
-        [scriptblock]$Preview
+        [scriptblock]$Preview,
+
+        [switch]$Tree
     )
 
     if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
@@ -67,6 +77,10 @@ function Select-ConsoleItem {
         }
     }
     $flagCount = @($flags | Where-Object { $_ }).Count
+
+    $treeMode = $false
+    $collapsed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $pendingIdx = -1
 
     $selected = [System.Collections.Generic.HashSet[int]]::new()
     $filter = ''
@@ -96,6 +110,81 @@ function Select-ConsoleItem {
         })
     }
 
+    function New-TreeNode([string]$name, [string]$path) {
+        @{
+            Name  = $name
+            Path  = $path
+            Dirs  = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+            Files = [System.Collections.Generic.List[object]]::new()
+            All   = [System.Collections.Generic.List[int]]::new()
+        }
+    }
+
+    # Appends the rows of one tree level: folders first (chains of single-child
+    # folders are shown as one row), then the entries. Collapsed folders hide their children.
+    function Add-TreeRows($node, [int]$depth, [int]$parent, $out) {
+        foreach ($name in @($node.Dirs.Keys | Sort-Object)) {
+            $d = $node.Dirs[$name]
+            $label = $name
+            while ($d.Dirs.Count -eq 1 -and $d.Files.Count -eq 0) {
+                $only = @($d.Dirs.Values)[0]
+                $label += '\' + $only.Name
+                $d = $only
+            }
+            if ($d.Dirs.Count -eq 0 -and $d.Files.Count -eq 1) {
+                # A folder with a single entry is shown as that entry, no extra level.
+                $f = $d.Files[0]
+                $out.Add([pscustomobject]@{
+                    Kind = 'item'; Index = $f.Index; Text = "$label\$($f.Label)"; Depth = $depth; Id = $null
+                    Leaves = @($f.Index); Open = $false; Parent = $parent
+                })
+                continue
+            }
+            $open = -not $collapsed.Contains($d.Path)
+            $out.Add([pscustomobject]@{
+                Kind = 'dir'; Index = -1; Text = $label; Depth = $depth; Id = $d.Path
+                Leaves = $d.All.ToArray(); Open = $open; Parent = $parent
+            })
+            if ($open) { Add-TreeRows $d ($depth + 1) ($out.Count - 1) $out }
+        }
+        foreach ($f in @($node.Files | Sort-Object { $_.Label })) {
+            $out.Add([pscustomobject]@{
+                Kind = 'item'; Index = $f.Index; Text = $f.Label; Depth = $depth; Id = $null
+                Leaves = @($f.Index); Open = $false; Parent = $parent
+            })
+        }
+    }
+
+    # The rows to draw: one per shown item, or a folder tree of them.
+    function Get-Rows($visible) {
+        if (-not $treeMode) {
+            return @($visible | ForEach-Object {
+                [pscustomobject]@{
+                    Kind = 'item'; Index = $_; Text = $items[$_]; Depth = 0; Id = $null
+                    Leaves = @($_); Open = $false; Parent = -1
+                }
+            })
+        }
+        $root = New-TreeNode '' ''
+        foreach ($idx in $visible) {
+            $segs = @($items[$idx] -split '[\\/]' | Where-Object { $_ })
+            if ($segs.Count -eq 0) { $segs = @($items[$idx]) }
+            $node = $root
+            $node.All.Add($idx)
+            for ($s = 0; $s -lt $segs.Count - 1; $s++) {
+                if (-not $node.Dirs.ContainsKey($segs[$s])) {
+                    $node.Dirs[$segs[$s]] = New-TreeNode $segs[$s] "$($node.Path)\$($segs[$s])"
+                }
+                $node = $node.Dirs[$segs[$s]]
+                $node.All.Add($idx)
+            }
+            $node.Files.Add([pscustomobject]@{ Index = $idx; Label = $segs[-1] })
+        }
+        $out = [System.Collections.Generic.List[object]]::new()
+        Add-TreeRows $root 0 -1 $out
+        $out.ToArray()
+    }
+
     $oldCursorVisible = [Console]::CursorVisible
     $oldCtrlC = [Console]::TreatControlCAsInput
     [Console]::CursorVisible = $false
@@ -117,14 +206,23 @@ function Select-ConsoleItem {
 
         while ($true) {
             $visible = @(Get-Visible)
+            $rows = @(Get-Rows $visible)
+            if ($pendingIdx -ge 0) {
+                # Keep the same entry under the cursor after switching list <-> tree.
+                for ($q = 0; $q -lt $rows.Count; $q++) {
+                    if ($rows[$q].Kind -eq 'item' -and $rows[$q].Index -eq $pendingIdx) { $cursor = $q; break }
+                }
+                $pendingIdx = -1
+            }
             $listRows = if ($previewOn) { $region - $previewRows } else { $region }
-            if ($cursor -ge $visible.Count) { $cursor = [Math]::Max(0, $visible.Count - 1) }
+            if ($cursor -ge $rows.Count) { $cursor = [Math]::Max(0, $rows.Count - 1) }
             if ($cursor -lt $offset) { $offset = $cursor }
             if ($cursor -ge $offset + $listRows) { $offset = $cursor - $listRows + 1 }
 
             & $line 0 $Title Cyan $null
             $help = '[↑↓] move · [Space] mark · [a] all matching · [n] none · '
             if ($flagCount -gt 0) { $help += "[d] $FlagLabel · " }
+            if ($Tree) { $help += if ($treeMode) { '[←→] fold · [g] list · ' } else { '[g] tree · ' } }
             if ($Preview) { $help += '[p] preview · ' }
             $help += '[f] filter · [Enter] done · [Esc/Ctrl+C] cancel'
             & $line 1 $help DarkGray $null
@@ -133,26 +231,46 @@ function Select-ConsoleItem {
 
             for ($r = 0; $r -lt $listRows; $r++) {
                 $vi = $offset + $r
-                if ($vi -ge $visible.Count) {
+                if ($vi -ge $rows.Count) {
                     & $line (3 + $r) '' $null $null
                     continue
                 }
-                $idx = $visible[$vi]
-                $mark = if ($selected.Contains($idx)) { '[x]' } else { '[ ]' }
+                $row = $rows[$vi]
                 $arrow = if ($vi -eq $cursor) { '>' } else { ' ' }
-                $fg = if ($flags[$idx]) { 'Red' } elseif ($selected.Contains($idx)) { 'Green' } else { $null }
                 $bg = if ($vi -eq $cursor) { 'DarkGray' } else { $null }
-                & $line (3 + $r) "$arrow $mark $($items[$idx])" $fg $bg
+                $indent = '  ' * $row.Depth
+                $on = @($row.Leaves | Where-Object { $selected.Contains($_) }).Count
+                $all = $on -eq $row.Leaves.Count
+                if ($row.Kind -eq 'dir') {
+                    $mark = if ($on -eq 0) { '[ ]' } elseif ($all) { '[x]' } else { '[-]' }
+                    $glyph = if ($row.Open) { '▾' } else { '▸' }
+                    $allFlagged = [bool]$Flag -and @($row.Leaves | Where-Object { -not $flags[$_] }).Count -eq 0
+                    $fg = if ($allFlagged) { 'Red' } elseif ($all) { 'Green' } else { 'Cyan' }
+                    $text = "$arrow $indent$mark $glyph $($row.Text)  ($($row.Leaves.Count))"
+                }
+                else {
+                    $mark = if ($all) { '[x]' } else { '[ ]' }
+                    $fg = if ($flags[$row.Index]) { 'Red' } elseif ($all) { 'Green' } else { $null }
+                    $pad = if ($treeMode) { '  ' } else { '' }
+                    $text = "$arrow $indent$mark $pad$($row.Text)"
+                }
+                & $line (3 + $r) $text $fg $bg
             }
 
             # Rows below the list: preview, or blank when it is off.
             $pv = @()
-            if ($previewOn -and $visible.Count -gt 0) {
-                $cur = $items[$visible[$cursor]]
-                if (-not $previewCache.ContainsKey($cur)) {
-                    $previewCache[$cur] = try { @(& $Preview $cur | Select-Object -First ($previewRows - 1)) } catch { @('(preview failed)') }
+            if ($previewOn -and $rows.Count -gt 0) {
+                $curRow = $rows[$cursor]
+                if ($curRow.Kind -eq 'dir') {
+                    $pv = @("$($curRow.Leaves.Count) entries in this folder")
                 }
-                $pv = $previewCache[$cur]
+                else {
+                    $cur = $items[$curRow.Index]
+                    if (-not $previewCache.ContainsKey($cur)) {
+                        $previewCache[$cur] = try { @(& $Preview $cur | Select-Object -First ($previewRows - 1)) } catch { @('(preview failed)') }
+                    }
+                    $pv = $previewCache[$cur]
+                }
             }
             for ($r = $listRows; $r -lt $region; $r++) {
                 $k = $r - $listRows
@@ -162,11 +280,12 @@ function Select-ConsoleItem {
                 else { & $line (3 + $r) '' $null $null }
             }
 
-            $first = if ($visible.Count) { $offset + 1 } else { 0 }
-            $last = [Math]::Min($offset + $listRows, $visible.Count)
-            $status = "$($selected.Count) marked · rows $first-$last of $($visible.Count) · on row $(if ($visible.Count) { $cursor + 1 } else { 0 })"
-            if ($filter) { $status += " (filter matches, $($items.Count) in total)" }
-            elseif ($last -lt $visible.Count) { $status += ' (↓ for more)' }
+            $first = if ($rows.Count) { $offset + 1 } else { 0 }
+            $last = [Math]::Min($offset + $listRows, $rows.Count)
+            $status = "$($selected.Count) marked · rows $first-$last of $($rows.Count) · on row $(if ($rows.Count) { $cursor + 1 } else { 0 })"
+            if ($treeMode) { $status += ' · tree' }
+            if ($filter) { $status += " (filter matches $($visible.Count) of $($items.Count) entries)" }
+            elseif ($last -lt $rows.Count) { $status += ' (↓ for more)' }
             if ($flagCount -gt 0) { $status += " · $flagCount $FlagLabel (red)" }
             & $line ($total - 1) $status DarkCyan $null
 
@@ -179,11 +298,27 @@ function Select-ConsoleItem {
             $handled = $true
             switch ($key.Key) {
                 'UpArrow'   { if ($cursor -gt 0) { $cursor-- } }
-                'DownArrow' { if ($cursor -lt $visible.Count - 1) { $cursor++ } }
+                'DownArrow' { if ($cursor -lt $rows.Count - 1) { $cursor++ } }
                 'PageUp'    { $cursor = [Math]::Max(0, $cursor - $listRows) }
-                'PageDown'  { $cursor = [Math]::Min([Math]::Max(0, $visible.Count - 1), $cursor + $listRows) }
+                'PageDown'  { $cursor = [Math]::Min([Math]::Max(0, $rows.Count - 1), $cursor + $listRows) }
                 'Home'      { $cursor = 0 }
-                'End'       { $cursor = [Math]::Max(0, $visible.Count - 1) }
+                'End'       { $cursor = [Math]::Max(0, $rows.Count - 1) }
+                'LeftArrow' {
+                    # Collapse the folder, or jump to the parent folder.
+                    if ($treeMode -and $rows.Count) {
+                        $row = $rows[$cursor]
+                        if ($row.Kind -eq 'dir' -and $row.Open) { [void]$collapsed.Add($row.Id) }
+                        elseif ($row.Parent -ge 0) { $cursor = $row.Parent }
+                    }
+                }
+                'RightArrow' {
+                    # Expand the folder, or step into it.
+                    if ($treeMode -and $rows.Count) {
+                        $row = $rows[$cursor]
+                        if ($row.Kind -eq 'dir' -and -not $row.Open) { [void]$collapsed.Remove($row.Id) }
+                        elseif ($row.Kind -eq 'dir' -and $cursor -lt $rows.Count - 1) { $cursor++ }
+                    }
+                }
                 'Enter'     { if ($filtering) { $filtering = $false } else { $done = $true } }
                 'Escape'    { if ($filtering) { $filtering = $false } else { $cancelled = $true; $done = $true } }
                 default     { $handled = $false }
@@ -202,14 +337,24 @@ function Select-ConsoleItem {
 
             switch ($key.KeyChar) {
                 ' ' {
-                    if ($visible.Count -gt 0) {
-                        $idx = $visible[$cursor]
-                        if (-not $selected.Remove($idx)) { [void]$selected.Add($idx) }
+                    # An entry toggles itself, a folder toggles everything below it.
+                    if ($rows.Count -gt 0) {
+                        $leaves = $rows[$cursor].Leaves
+                        $allOn = @($leaves | Where-Object { -not $selected.Contains($_) }).Count -eq 0
+                        foreach ($l in $leaves) { if ($allOn) { [void]$selected.Remove($l) } else { [void]$selected.Add($l) } }
                     }
                 }
                 'a' {
                     $allOn = $visible.Count -gt 0 -and @($visible | Where-Object { -not $selected.Contains($_) }).Count -eq 0
                     foreach ($v in $visible) { if ($allOn) { [void]$selected.Remove($v) } else { [void]$selected.Add($v) } }
+                }
+                'g' {
+                    if ($Tree) {
+                        $pendingIdx = if ($rows.Count -and $rows[$cursor].Kind -eq 'item') { $rows[$cursor].Index } else { -1 }
+                        $treeMode = -not $treeMode
+                        $cursor = 0
+                        $offset = 0
+                    }
                 }
                 'n' { $selected.Clear() }
                 'd' { if ($Flag) { foreach ($v in $visible) { if ($flags[$v]) { [void]$selected.Add($v) } } } }

@@ -51,6 +51,8 @@ Keys in the interactive list (entries that no longer exist are red):
 | `↑` `↓` `PgUp` `PgDn` | move |
 | `Space` | mark / unmark |
 | `a` / `n` | mark all matching the filter (all without one) / unmark all |
+| `g` | switch between flat list and folder tree |
+| `←` `→` | tree: collapse / expand a folder (`Space` on a folder marks everything below) |
 | `d` | mark all missing entries |
 | `p` | preview on / off (modified date and first lines of the config) |
 | `f` / `/` | live filter (`Enter` or `Esc` leaves it) |

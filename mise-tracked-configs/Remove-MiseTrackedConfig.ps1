@@ -120,7 +120,7 @@ try {
     # Work out what to remove.
     if ($interactive) {
         $pick = Select-ConsoleItem -Items $tracked -Title "Tracked configs ($($tracked.Count))" `
-            -Flag ${function:Test-ConfigMissing} -FlagLabel 'missing' -Preview ${function:Get-ConfigPreview}
+            -Flag ${function:Test-ConfigMissing} -FlagLabel 'missing' -Preview ${function:Get-ConfigPreview} -Tree
         if ($pick.Cancelled) {
             Write-Host 'Aborted, nothing removed.'
             exit 0
