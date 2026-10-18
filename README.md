@@ -41,7 +41,7 @@ script directly.
 .\Remove-MiseTrackedConfig.ps1 -Missing -WhatIf
 
 # delete for good instead of using the recycle bin
-.Remove-MiseTrackedConfig.ps1 -Missing -Permanent
+.\Remove-MiseTrackedConfig.ps1 -Missing -Permanent
 ```
 
 Keys in the interactive list (entries that no longer exist are red):
@@ -59,8 +59,9 @@ Keys in the interactive list (entries that no longer exist are red):
 
 Removed entries go to the recycle bin by default (restoring a file brings the entry
 back). The confirmation offers recycle bin (Enter), permanent or no; `-Force` uses
-the recycle bin, `-Permanent` deletes for good. Matching is case-insensitive. The list picker lives in `lib/Select-ConsoleItem.ps1`
-and can be reused by other scripts.
+the recycle bin, `-Permanent` deletes for good. Matching is case-insensitive.
+The list picker lives in `lib/Select-ConsoleItem.ps1` and can be reused by other
+scripts.
 
 Note that mise re-adds the entry as soon as you `cd` into that project, so this
 is only useful for projects you are done with.
