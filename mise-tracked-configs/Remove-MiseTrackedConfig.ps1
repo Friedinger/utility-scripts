@@ -28,6 +28,11 @@
 .PARAMETER Force
   Skip the confirmation prompt. Requires -Path or -Missing. Alias: -y.
 
+.PARAMETER Permanent
+  Delete for good instead of moving to the recycle bin. Without it the
+  confirmation offers recycle bin (default), permanent or no, and -Force
+  uses the recycle bin. Restoring from the recycle bin brings the entry back.
+
 .PARAMETER StateDir
   Override the tracked-configs directory instead of asking `mise doctor`
   for it. Mainly useful for testing.
@@ -49,6 +54,8 @@ param(
 
     [Alias('y')]
     [switch]$Force,
+
+    [switch]$Permanent,
 
     [string]$StateDir
 )
@@ -164,23 +171,45 @@ try {
         }
     }
 
+    $recycle = -not $Permanent
     if (-not $Force -and -not $WhatIfPreference) {
         Write-Host ''
-        $conf = Read-Host "Really remove $($targets.Count)? (y/N)"
-        if ($conf -notmatch '^(y|yes)$') {
+        if ($Permanent) {
+            $conf = Read-Host "Permanently remove $($targets.Count)? (y/N)"
+            $ok = $conf -match '^(y|yes)$'
+        }
+        else {
+            $conf = Read-Host '[R]ecycle bin (default) / [P]ermanent / [N]o'
+            switch -Regex ($conf.Trim()) {
+                '^(r|recycle)?$' { $ok = $true }
+                '^(p|permanent)$' { $ok = $true; $recycle = $false }
+                default { $ok = $false }
+            }
+        }
+        if (-not $ok) {
             Write-Host 'Aborted, nothing removed.'
             exit 0
         }
     }
+    if ($recycle) { Add-Type -AssemblyName Microsoft.VisualBasic }
 
     # Remove, one entry at a time so a failure does not stop the rest.
     Write-Host ''
     $removed = 0
     $failed = 0
     foreach ($t in $targets) {
-        if (-not $PSCmdlet.ShouldProcess($t, 'Remove tracked config')) { continue }
+        $action = if ($recycle) { 'Move tracked config to recycle bin' } else { 'Permanently remove tracked config' }
+        if (-not $PSCmdlet.ShouldProcess($t, $action)) { continue }
         try {
-            $entries[$t] | ForEach-Object { Remove-Item -LiteralPath $_ -Force }
+            foreach ($file in $entries[$t]) {
+                if ($recycle) {
+                    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($file,
+                        'OnlyErrorDialogs', 'SendToRecycleBin')
+                }
+                else {
+                    Remove-Item -LiteralPath $file -Force
+                }
+            }
             if (@($entries[$t] | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0) {
                 throw 'entry is still there'
             }
