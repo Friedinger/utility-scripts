@@ -80,10 +80,17 @@ anything else), fast-forwards it, deletes local branches already merged into
 it, and optionally runs `npm install`/`npm ci`. Repos with uncommitted changes
 are left untouched.
 
+Every repo gets one result line (`Updated`, `Current`, `Skipped`, `Failed`), and
+a summary at the end counts them and lists the repos that need attention.
+
+`npm install` is only offered for repos that were updated and already had
+`node_modules`. Instead of asking per repo during the run, the candidates are
+shown in one list after the sync (same keys as in Remove-MiseTrackedConfig, the
+preview shows what changed in `package.json` and the lockfile).
+
 Works inside OneDrive: repos whose `.git` folder is not fully available
 locally (and online-only folders) are silently skipped, so nothing gets
-downloaded for them. `npm install` is only offered when a repo was updated and
-already had `node_modules`.
+downloaded for them.
 
 ### Requirements
 
@@ -96,8 +103,11 @@ already had `node_modules`.
 # syncs the current folder's subfolders
 .\Sync-GitRepos.ps1
 
-# syncs a specific folder, and npm install/ci where a repo was updated
-.\Sync-GitRepos.ps1 C:\Projects -InstallDeps
+# syncs a specific folder and npm installs every updated repo, no list
+.\Sync-GitRepos.ps1 C:\Projects -InstallDeps:$true
+
+# never npm install, no list
+.\Sync-GitRepos.ps1 C:\Projects -InstallDeps:$false
 
 # only look two folder levels deep
 .\Sync-GitRepos.ps1 C:\Projects -MaxDepth 2
