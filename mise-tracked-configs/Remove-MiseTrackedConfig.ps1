@@ -63,6 +63,17 @@ function Test-ConfigMissing([string]$p) {
     -not (Test-Path -LiteralPath $p)
 }
 
+# Last-modified date plus the first lines of the config, for the list preview.
+function Get-ConfigPreview([string]$p) {
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
+        '(file not found)'
+        if (-not (Test-Path -LiteralPath (Split-Path $p -Parent))) { '(folder gone too)' }
+        return
+    }
+    "modified $((Get-Item -LiteralPath $p).LastWriteTime.ToString('yyyy-MM-dd HH:mm'))"
+    Get-Content -LiteralPath $p -TotalCount 4
+}
+
 try {
     if ($Force -and -not $Path -and -not $Missing) {
         throw '-Force needs -Path or -Missing.'
@@ -87,7 +98,7 @@ try {
     # Read every entry file once: tracked path -> the file(s) that record it.
     $entries = @{}
     foreach ($f in Get-ChildItem -LiteralPath $StateDir -File) {
-        $p = (Get-Content -LiteralPath $f.FullName -Raw).Trim()
+        $p = (Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8).Trim()
         if (-not $p) { continue }
         if (-not $entries.ContainsKey($p)) { $entries[$p] = [System.Collections.Generic.List[string]]::new() }
         $entries[$p].Add($f.FullName)
@@ -102,7 +113,7 @@ try {
     # Work out what to remove.
     if ($interactive) {
         $pick = Select-ConsoleItem -Items $tracked -Title "Tracked configs ($($tracked.Count))" `
-            -Flag ${function:Test-ConfigMissing} -FlagLabel 'missing'
+            -Flag ${function:Test-ConfigMissing} -FlagLabel 'missing' -Preview ${function:Get-ConfigPreview}
         if ($pick.Cancelled) {
             Write-Host 'Aborted, nothing removed.'
             exit 0

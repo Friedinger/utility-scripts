@@ -29,6 +29,11 @@
 .PARAMETER FlagLabel
   Name of the flagged group, used in the help line and status line.
 
+.PARAMETER Preview
+  Optional scriptblock that receives the item under the cursor and returns up
+  to 5 lines of text. Shown below the list; toggled on and off with p (on by
+  default). Results are cached per item.
+
 .EXAMPLE
   . "$PSScriptRoot\..\lib\Select-ConsoleItem.ps1"
   $r = Select-ConsoleItem -Items $paths -Flag { param($p) -not (Test-Path -LiteralPath $p) } -FlagLabel missing
@@ -45,7 +50,9 @@ function Select-ConsoleItem {
 
         [scriptblock]$Flag,
 
-        [string]$FlagLabel = 'flagged'
+        [string]$FlagLabel = 'flagged',
+
+        [scriptblock]$Preview
     )
 
     if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
@@ -70,8 +77,16 @@ function Select-ConsoleItem {
     $done = $false
 
     $width = [Math]::Max(20, [Console]::WindowWidth - 1)
-    $listRows = [Math]::Max(3, [Math]::Min($items.Count, [Console]::WindowHeight - 6))
-    $total = $listRows + 4
+    # The preview takes 6 rows (separator + 5 lines) from the bottom of the list region.
+    $previewRows = 6
+    $previewOn = [bool]$Preview
+    $previewCache = @{}
+    $region = if ($Preview) {
+        [Math]::Max($previewRows + 3, [Math]::Min($items.Count + $previewRows, [Console]::WindowHeight - 6))
+    } else {
+        [Math]::Max(3, [Math]::Min($items.Count, [Console]::WindowHeight - 6))
+    }
+    $total = $region + 4
 
     function Get-Visible {
         if ($items.Count -eq 0) { return @() }
@@ -99,6 +114,7 @@ function Select-ConsoleItem {
 
         while ($true) {
             $visible = @(Get-Visible)
+            $listRows = if ($previewOn) { $region - $previewRows } else { $region }
             if ($cursor -ge $visible.Count) { $cursor = [Math]::Max(0, $visible.Count - 1) }
             if ($cursor -lt $offset) { $offset = $cursor }
             if ($cursor -ge $offset + $listRows) { $offset = $cursor - $listRows + 1 }
@@ -106,6 +122,7 @@ function Select-ConsoleItem {
             & $line 0 $Title Cyan $null
             $help = '[↑↓] move · [Space] mark · [a] all shown · [n] none · '
             if ($flagCount -gt 0) { $help += "[d] $FlagLabel · " }
+            if ($Preview) { $help += '[p] preview · ' }
             $help += '[/] filter · [Enter] done · [Esc] cancel'
             & $line 1 $help DarkGray $null
             $filterText = if ($filtering) { "filter: $filter▏" } elseif ($filter) { "filter: $filter  (/ to edit)" } else { '' }
@@ -123,6 +140,23 @@ function Select-ConsoleItem {
                 $fg = if ($flags[$idx]) { 'Red' } elseif ($selected.Contains($idx)) { 'Green' } else { $null }
                 $bg = if ($vi -eq $cursor) { 'DarkGray' } else { $null }
                 & $line (3 + $r) "$arrow $mark $($items[$idx])" $fg $bg
+            }
+
+            # Rows below the list: preview, or blank when it is off.
+            $pv = @()
+            if ($previewOn -and $visible.Count -gt 0) {
+                $cur = $items[$visible[$cursor]]
+                if (-not $previewCache.ContainsKey($cur)) {
+                    $previewCache[$cur] = try { @(& $Preview $cur | Select-Object -First ($previewRows - 1)) } catch { @('(preview failed)') }
+                }
+                $pv = $previewCache[$cur]
+            }
+            for ($r = $listRows; $r -lt $region; $r++) {
+                $k = $r - $listRows
+                if (-not $previewOn) { & $line (3 + $r) '' $null $null }
+                elseif ($k -eq 0) { & $line (3 + $r) '── preview ──' DarkCyan $null }
+                elseif ($k - 1 -lt $pv.Count) { & $line (3 + $r) "  $($pv[$k - 1] -replace "`t", '  ')" DarkGray $null }
+                else { & $line (3 + $r) '' $null $null }
             }
 
             $status = "$($selected.Count) marked · $($visible.Count) of $($items.Count) shown"
@@ -168,6 +202,7 @@ function Select-ConsoleItem {
                 'n' { $selected.Clear() }
                 'd' { if ($Flag) { foreach ($v in $visible) { if ($flags[$v]) { [void]$selected.Add($v) } } } }
                 '/' { $filtering = $true }
+                'p' { if ($Preview) { $previewOn = -not $previewOn } }
                 'q' { $cancelled = $true; $done = $true }
             }
             if ($done) { break }
