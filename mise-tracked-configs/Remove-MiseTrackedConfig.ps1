@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-  Removes an entry from mise's tracked-configs cache.
+  Removes entries from mise's tracked-configs cache.
 
 .DESCRIPTION
   mise remembers every config file it has ever seen, in every directory you
@@ -8,17 +8,25 @@
   around and keep showing up in `mise ls --all-sources`. `mise trust` /
   `mise untrust` do not help here — they manage a different list
   (trusted-configs), and mise ships no command for removing tracked entries
-  at all. This script deletes the entry directly from mise's state directory.
+  at all. This script deletes the entries directly from mise's state directory.
 
-  With no -Path, lists all tracked configs and asks which one to remove.
-  With -Path, removes that one directly, still asking to confirm unless
-  -Force is also given. Matching is exact, but case-insensitive.
+  Without -Path and -Missing, opens an interactive list: mark entries with
+  Space, filter with /, mark all entries whose file no longer exists with d.
+  Entries that no longer exist are shown in red.
+
+  In every mode the entries about to be removed are listed first and need a
+  confirmation, unless -Force is given.
 
 .PARAMETER Path
-  The tracked config path to remove. Omit for the interactive picker.
+  One or more tracked config paths to remove. Wildcards (* ?) are allowed,
+  e.g. 'D:\Archive\*'. Matching is case-insensitive.
+
+.PARAMETER Missing
+  Only consider entries whose config file no longer exists. Alone: removes
+  all of them. Together with -Path: only those matches that are missing.
 
 .PARAMETER Force
-  Skip the confirmation prompt. Requires -Path. Alias: -y.
+  Skip the confirmation prompt. Requires -Path or -Missing. Alias: -y.
 
 .PARAMETER StateDir
   Override the tracked-configs directory instead of asking `mise doctor`
@@ -27,12 +35,17 @@
 .EXAMPLE
   Remove-MiseTrackedConfig.ps1
   Remove-MiseTrackedConfig.ps1 'C:\path\to\mise.toml'
-  Remove-MiseTrackedConfig.ps1 'C:\path\to\mise.toml' -y
+  Remove-MiseTrackedConfig.ps1 'D:\Archive\*' -Missing
+  Remove-MiseTrackedConfig.ps1 -Missing -y
+  Remove-MiseTrackedConfig.ps1 -Missing -WhatIf
 #>
 
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Position = 0)]
-    [string]$Path,
+    [string[]]$Path,
+
+    [switch]$Missing,
 
     [Alias('y')]
     [switch]$Force,
@@ -44,14 +57,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-try {
-    if ($Force -and -not $Path) {
-        throw '-Force needs a path.'
-    }
-    $interactive = -not $Path
+. (Join-Path $PSScriptRoot '..\lib\Select-ConsoleItem.ps1')
 
-    $override = [bool]$StateDir
-    if (-not $override) {
+function Test-ConfigMissing([string]$p) {
+    -not (Test-Path -LiteralPath $p)
+}
+
+try {
+    if ($Force -and -not $Path -and -not $Missing) {
+        throw '-Force needs -Path or -Missing.'
+    }
+    $interactive = -not $Path -and -not $Missing
+
+    if (-not $StateDir) {
         if (-not (Get-Command mise -ErrorAction SilentlyContinue)) {
             throw 'mise not found on PATH.'
         }
@@ -66,78 +84,110 @@ try {
         throw "Directory not found: $StateDir"
     }
 
-    if ($override) {
-        $tracked = @(Get-ChildItem -LiteralPath $StateDir -File |
-            ForEach-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() })
-    } else {
-        $tracked = @(mise config ls --tracked-configs |
-            ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    # Read every entry file once: tracked path -> the file(s) that record it.
+    $entries = @{}
+    foreach ($f in Get-ChildItem -LiteralPath $StateDir -File) {
+        $p = (Get-Content -LiteralPath $f.FullName -Raw).Trim()
+        if (-not $p) { continue }
+        if (-not $entries.ContainsKey($p)) { $entries[$p] = [System.Collections.Generic.List[string]]::new() }
+        $entries[$p].Add($f.FullName)
     }
-    $tracked = @($tracked | Sort-Object -Unique)
+    $tracked = @($entries.Keys | Sort-Object)
 
     if ($tracked.Count -eq 0) {
         Write-Host 'No tracked configs found.'
         exit 0
     }
 
+    # Work out what to remove.
     if ($interactive) {
-        Write-Host ''
-        Write-Host "Tracked configs ($($tracked.Count)):" -ForegroundColor Cyan
-        Write-Host ''
-        $tracked | ForEach-Object { Write-Host "  $_" }
+        $pick = Select-ConsoleItem -Items $tracked -Title "Tracked configs ($($tracked.Count))" `
+            -Flag ${function:Test-ConfigMissing} -FlagLabel 'missing'
+        if ($pick.Cancelled) {
+            Write-Host 'Aborted, nothing removed.'
+            exit 0
+        }
+        $targets = @($pick.Items)
+    }
+    else {
+        $candidates = $tracked
+        if ($Path) {
+            $unmatched = @()
+            $matched = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($pattern in $Path) {
+                $pattern = $pattern.Trim()
+                $wild = [WildcardPattern]::ContainsWildcardCharacters($pattern)
+                $hits = @($tracked | Where-Object { $_ -eq $pattern -or ($wild -and $_ -like $pattern) })
+                if ($hits.Count -eq 0) { $unmatched += $pattern }
+                foreach ($h in $hits) { [void]$matched.Add($h) }
+            }
+            foreach ($u in $unmatched) { Write-Host "Not in the list: $u" -ForegroundColor Red }
+            $candidates = @($tracked | Where-Object { $matched.Contains($_) })
+        }
+        if ($Missing) {
+            $candidates = @($candidates | Where-Object { Test-ConfigMissing $_ })
+        }
+        $targets = @($candidates)
+        if ($targets.Count -eq 0) {
+            Write-Host 'Nothing to remove.'
+            exit $(if ($unmatched) { 1 } else { 0 })
+        }
     }
 
-    while ($true) {
-        if ($interactive) {
-            Write-Host ''
-            $t = Read-Host 'Path to remove'
-            if ([string]::IsNullOrWhiteSpace($t)) {
-                Write-Host 'Aborted.'
-                exit 0
-            }
-            $t = $t.Trim()
+    if ($targets.Count -eq 0) {
+        Write-Host 'Nothing marked, nothing removed.'
+        exit 0
+    }
+
+    # Always show the final list before removing.
+    Write-Host ''
+    Write-Host "About to remove $($targets.Count) $(if ($targets.Count -eq 1) { 'entry' } else { 'entries' }):" -ForegroundColor Yellow
+    Write-Host ''
+    foreach ($t in $targets) {
+        if (Test-ConfigMissing $t) {
+            Write-Host "  $t" -NoNewline
+            Write-Host '  (missing)' -ForegroundColor DarkGray
         }
         else {
-            $t = $Path.Trim()
-        }
-
-        $hit = $tracked | Where-Object { $_ -eq $t } | Select-Object -First 1
-        if ($hit) {
-            $target = $hit
-            break
-        }
-
-        Write-Host "Not in the list: $t" -ForegroundColor Red
-        if (-not $interactive) {
-            exit 1
+            Write-Host "  $t"
         }
     }
 
-    Write-Host ''
-    Write-Host "About to remove: $target" -ForegroundColor Yellow
-    if (-not $Force) {
-        $conf = Read-Host 'Really remove? (y/N)'
+    if (-not $Force -and -not $WhatIfPreference) {
+        Write-Host ''
+        $conf = Read-Host "Really remove $($targets.Count)? (y/N)"
         if ($conf -notmatch '^(y|yes)$') {
             Write-Host 'Aborted, nothing removed.'
             exit 0
         }
     }
 
-    $victims = @(Get-ChildItem -LiteralPath $StateDir -File |
-        Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() -eq $target })
-    if ($victims.Count -eq 0) {
-        throw "Entry not found in directory: $target"
-    }
-    $victims | Remove-Item -Force
-
-    $left = @(Get-ChildItem -LiteralPath $StateDir -File |
-        Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() -eq $target })
-    if ($left.Count -gt 0) {
-        throw "Removal failed, entry is still there: $target"
-    }
-
+    # Remove, one entry at a time so a failure does not stop the rest.
     Write-Host ''
-    Write-Host "Removed: $target" -ForegroundColor Green
+    $removed = 0
+    $failed = 0
+    foreach ($t in $targets) {
+        if (-not $PSCmdlet.ShouldProcess($t, 'Remove tracked config')) { continue }
+        try {
+            $entries[$t] | ForEach-Object { Remove-Item -LiteralPath $_ -Force }
+            if (@($entries[$t] | Where-Object { Test-Path -LiteralPath $_ }).Count -gt 0) {
+                throw 'entry is still there'
+            }
+            Write-Host "Removed: $t" -ForegroundColor Green
+            $removed++
+        }
+        catch {
+            Write-Host "Failed:  $t ($($_.Exception.Message))" -ForegroundColor Red
+            $failed++
+        }
+    }
+
+    if (-not $WhatIfPreference) {
+        Write-Host ''
+        $color = if ($failed) { 'Red' } else { 'Green' }
+        Write-Host "Removed: $removed, failed: $failed" -ForegroundColor $color
+    }
+    if ($failed) { exit 1 }
 }
 catch {
     Write-Host ''

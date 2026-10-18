@@ -5,13 +5,13 @@ PowerShell, one topic per subfolder.
 
 ## mise-tracked-configs
 
-`Remove-MiseTrackedConfig.ps1` removes an entry from mise's tracked-configs cache.
+`Remove-MiseTrackedConfig.ps1` removes entries from mise's tracked-configs cache.
 
 mise remembers every config file it has ever seen, in every directory you have
 been in. Entries for archived or deleted projects therefore stick around and
 keep showing up in `mise ls --all-sources`. `mise trust` / `mise untrust` do not
 help here — they manage a different list (`trusted-configs`), and mise ships no
-command for removing tracked entries at all. This script deletes the entry.
+command for removing tracked entries at all. This script deletes the entries.
 
 ### Requirements
 
@@ -24,17 +24,37 @@ Double-click `Remove-MiseTrackedConfig.cmd` for the interactive version, or call
 script directly.
 
 ```powershell
-# interactive: lists all tracked configs, then asks for one
+# interactive list: mark entries, then review and confirm
 .\Remove-MiseTrackedConfig.ps1
 
-# pick the path directly, still asks to confirm
+# direct, still lists the entries and asks to confirm
 .\Remove-MiseTrackedConfig.ps1 'C:\path\to\mise.toml'
 
-# skip the confirmation (-Force, or -y)
-.\Remove-MiseTrackedConfig.ps1 'C:\path\to\mise.toml' -y
+# several paths and wildcards
+.\Remove-MiseTrackedConfig.ps1 'D:\Archive\*', 'C:\old\mise.toml'
+
+# everything whose config file no longer exists (optionally narrowed by -Path)
+.\Remove-MiseTrackedConfig.ps1 -Missing
+
+# skip the confirmation (-Force, or -y), or just preview with -WhatIf
+.\Remove-MiseTrackedConfig.ps1 -Missing -y
+.\Remove-MiseTrackedConfig.ps1 -Missing -WhatIf
 ```
 
-Matching is exact, but case-insensitive. Press Enter or Ctrl+C to abort.
+Keys in the interactive list (entries that no longer exist are red):
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓` `PgUp` `PgDn` | move |
+| `Space` | mark / unmark |
+| `a` / `n` | mark all shown / unmark all |
+| `d` | mark all missing entries |
+| `/` | live filter (`Enter` or `Esc` leaves it) |
+| `Enter` | done, then review and confirm |
+| `Esc` / `q` | cancel |
+
+Matching is case-insensitive. The list picker lives in `lib/Select-ConsoleItem.ps1`
+and can be reused by other scripts.
 
 Note that mise re-adds the entry as soon as you `cd` into that project, so this
 is only useful for projects you are done with.
