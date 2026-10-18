@@ -9,7 +9,7 @@
     a                              mark all items matching the filter (or unmark them if all are marked)
     n                              unmark everything
     d                              mark all matching flagged items (only with -Flag)
-    /                              live filter, Enter or Esc leaves the filter input
+    f, /                           live filter, Enter or Esc leaves the filter input
     Enter                          done
     Esc / q                        cancel
 
@@ -126,9 +126,9 @@ function Select-ConsoleItem {
             $help = '[↑↓] move · [Space] mark · [a] all matching · [n] none · '
             if ($flagCount -gt 0) { $help += "[d] $FlagLabel · " }
             if ($Preview) { $help += '[p] preview · ' }
-            $help += '[/] filter · [Enter] done · [Esc/Ctrl+C] cancel'
+            $help += '[f] filter · [Enter] done · [Esc/Ctrl+C] cancel'
             & $line 1 $help DarkGray $null
-            $filterText = if ($filtering) { "filter: $filter▏" } elseif ($filter) { "filter: $filter  (/ to edit)" } else { '' }
+            $filterText = if ($filtering) { "filter: $filter▏" } elseif ($filter) { "filter: $filter  (f to edit)" } else { '' }
             & $line 2 $filterText Yellow $null
 
             for ($r = 0; $r -lt $listRows; $r++) {
@@ -213,7 +213,7 @@ function Select-ConsoleItem {
                 }
                 'n' { $selected.Clear() }
                 'd' { if ($Flag) { foreach ($v in $visible) { if ($flags[$v]) { [void]$selected.Add($v) } } } }
-                '/' { $filtering = $true }
+                { $_ -in "f", "/" } { $filtering = $true }
                 'p' { if ($Preview) { $previewOn = -not $previewOn } }
                 'q' { $cancelled = $true; $done = $true }
             }

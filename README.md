@@ -53,7 +53,7 @@ Keys in the interactive list (entries that no longer exist are red):
 | `a` / `n` | mark all matching the filter (all without one) / unmark all |
 | `d` | mark all missing entries |
 | `p` | preview on / off (modified date and first lines of the config) |
-| `/` | live filter (`Enter` or `Esc` leaves it) |
+| `f` / `/` | live filter (`Enter` or `Esc` leaves it) |
 | `Enter` | done, then review and confirm |
 | `Esc` / `q` / `Ctrl+C` | cancel |
 
