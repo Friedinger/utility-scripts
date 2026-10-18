@@ -55,7 +55,7 @@ Keys in the interactive list (entries that no longer exist are red):
 | `p` | preview on / off (modified date and first lines of the config) |
 | `/` | live filter (`Enter` or `Esc` leaves it) |
 | `Enter` | done, then review and confirm |
-| `Esc` / `q` | cancel |
+| `Esc` / `q` / `Ctrl+C` | cancel |
 
 Removed entries go to the recycle bin by default (restoring a file brings the entry
 back). The confirmation offers recycle bin (Enter), permanent or no; `-Force` uses

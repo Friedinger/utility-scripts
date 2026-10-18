@@ -97,7 +97,10 @@ function Select-ConsoleItem {
     }
 
     $oldCursorVisible = [Console]::CursorVisible
+    $oldCtrlC = [Console]::TreatControlCAsInput
     [Console]::CursorVisible = $false
+    # Without this, Ctrl+C only flags a pipeline stop and the blocking ReadKey never returns.
+    [Console]::TreatControlCAsInput = $true
     try {
         1..$total | ForEach-Object { Write-Host '' }
         $top = [Console]::CursorTop - $total
@@ -123,7 +126,7 @@ function Select-ConsoleItem {
             $help = '[↑↓] move · [Space] mark · [a] all shown · [n] none · '
             if ($flagCount -gt 0) { $help += "[d] $FlagLabel · " }
             if ($Preview) { $help += '[p] preview · ' }
-            $help += '[/] filter · [Enter] done · [Esc] cancel'
+            $help += '[/] filter · [Enter] done · [Esc/Ctrl+C] cancel'
             & $line 1 $help DarkGray $null
             $filterText = if ($filtering) { "filter: $filter▏" } elseif ($filter) { "filter: $filter  (/ to edit)" } else { '' }
             & $line 2 $filterText Yellow $null
@@ -164,6 +167,11 @@ function Select-ConsoleItem {
             & $line ($total - 1) $status DarkCyan $null
 
             $key = [Console]::ReadKey($true)
+            # Depending on the host, Ctrl+C arrives as a plain key instead of an interrupt.
+            if ($key.Key -eq 'C' -and ($key.Modifiers -band [ConsoleModifiers]::Control)) {
+                $cancelled = $true
+                break
+            }
             $handled = $true
             switch ($key.Key) {
                 'UpArrow'   { if ($cursor -gt 0) { $cursor-- } }
@@ -211,6 +219,7 @@ function Select-ConsoleItem {
     finally {
         [Console]::SetCursorPosition(0, $top + $total)
         [Console]::CursorVisible = $oldCursorVisible
+        [Console]::TreatControlCAsInput = $oldCtrlC
     }
 
     [pscustomobject]@{
