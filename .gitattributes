@@ -1,0 +1,6 @@
+# Normalize line endings: LF in the repo and on checkout.
+* text=auto eol=lf
+
+# Windows batch files are safer with CRLF (cmd can misparse labels and goto with LF).
+*.cmd text eol=crlf
+*.bat text eol=crlf
