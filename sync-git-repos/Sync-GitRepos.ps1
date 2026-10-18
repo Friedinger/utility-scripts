@@ -12,19 +12,22 @@
     - checks out the default branch (only if clean) and pulls via --ff-only
     - deletes local branches that are already fully merged into the default branch
     - reports repos with no default branch detected or with diverged history
-    - optionally runs npm install, but only when the repo was updated and
-      already had node_modules installed before
+
+  Every repo gets one result line (Updated / Current / Skipped / Failed). After
+  all repos are done, the repos that were updated and already had node_modules
+  are offered for npm install in one list (npm ci if a package-lock.json is
+  present), then a summary shows the counts and what needs attention.
 
 .PARAMETER Root
   Folder to search for repos. Default: current folder.
 
 .PARAMETER InstallDeps
-  Controls npm install (npm ci if a package-lock.json is present) after a repo
-  is updated, so node_modules matches the newly pulled package.json/lockfile.
-  Only relevant for repos that already had node_modules.
-  Omitted: ask per repo whenever an install would be relevant.
-  $true: always install for every relevant repo, no prompts.
-  $false: never install, no prompts.
+  Controls npm install after the sync, so node_modules matches the newly
+  pulled package.json/lockfile. Only relevant for repos that were updated and
+  already had node_modules.
+  Omitted: pick the repos in an interactive list after the sync.
+  $true: install for every relevant repo, no list.
+  $false: never install, no list.
 
 .PARAMETER MaxDepth
   How many folder levels below Root to search for repos (1 = direct subfolders
@@ -44,11 +47,33 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+. (Join-Path $PSScriptRoot '..\lib\Select-ConsoleItem.ps1')
+
 $rootFull = (Resolve-Path $Root).Path.TrimEnd('\', '/')
+
+$results = [System.Collections.Generic.List[object]]::new()
+$npmCandidates = [ordered]@{}
+$offlineCount = 0
 
 function Get-RelativeName {
     param([string]$FullPath)
     return $FullPath.Substring($rootFull.Length).TrimStart('\', '/')
+}
+
+# One output line: "Label:     name  (detail)", the whole line in one color.
+function Write-Result {
+    param([string]$Label, [string]$Name, [string]$Detail, [string]$Color)
+    $text = '{0,-11} {1}' -f "${Label}:", $Name
+    if ($Detail) { $text += "  ($Detail)" }
+    Write-Host $text -ForegroundColor $Color
+}
+
+# Records the outcome of a repo for the summary and prints its result line.
+function Add-Result {
+    param([ValidateSet('Updated', 'Current', 'Skipped', 'Failed')][string]$State, [string]$Name, [string]$Detail)
+    $color = @{ Updated = 'Green'; Current = 'DarkGray'; Skipped = 'Yellow'; Failed = 'Red' }[$State]
+    $results.Add([pscustomobject]@{ State = $State; Name = $Name; Detail = $Detail; Color = $color })
+    Write-Result $State $Name $Detail $color
 }
 
 function Test-CloudOnly {
@@ -114,66 +139,58 @@ function Get-DefaultBranch {
     return $null
 }
 
-function Install-Dependencies {
-    param(
-        [string]$Name,
-        [string]$Path,
-        [bool]$WasUpdated,
-        [bool]$HadNodeModules,
-        [Nullable[bool]]$InstallDeps
-    )
+# The lines shown next to the npm install list: what changed in package.json / the lockfile.
+function Get-NpmPreview {
+    param([string]$Name)
+    $c = $npmCandidates[$Name]
+    $diff = @(git -C $c.Path diff --stat $c.Before $c.After -- package.json package-lock.json 2>$null)
+    if ($diff.Count -eq 0) { return 'package.json and lockfile unchanged' }
+    $diff | ForEach-Object { $_.Trim() }
+}
 
-    # Returns $true if an install was attempted and failed, $false otherwise.
-    if (-not $WasUpdated -or -not $HadNodeModules) { return $false }
-    if (-not (Test-Path (Join-Path $Path "package.json"))) { return $false }
+function Invoke-NpmInstall {
+    param([string]$Name, [string]$Path)
 
-    $shouldInstall = $InstallDeps
-    if ($null -eq $shouldInstall) {
-        $answer = Read-Host "[$Name] run npm install? (y/N)"
-        $shouldInstall = $answer -match '^(y|yes)$'
+    $cmd = if (Test-Path (Join-Path $Path "package-lock.json")) { 'npm ci' } else { 'npm install' }
+    Write-Result 'Installing' $Name $cmd 'Cyan'
+
+    Push-Location $Path
+    try {
+        if ($cmd -eq 'npm ci') { npm ci --silent 2>$null | Out-Null }
+        else { npm install --silent 2>$null | Out-Null }
+        $ok = $LASTEXITCODE -eq 0
+    }
+    finally {
+        Pop-Location
     }
 
-    if (-not $shouldInstall) {
-        Write-Host "[$Name] npm install skipped" -ForegroundColor DarkGray
-        return $false
-    }
-
-    if (Test-Path (Join-Path $Path "package-lock.json")) {
-        Write-Host "[$Name] running npm ci..." -ForegroundColor Cyan
-        npm ci --silent 2>$null | Out-Null
-    }
-    else {
-        Write-Host "[$Name] running npm install..." -ForegroundColor Cyan
-        npm install --silent 2>$null | Out-Null
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[$Name] npm install FAILED" -ForegroundColor Red
-        return $true
-    }
-
-    Write-Host "[$Name] dependencies installed" -ForegroundColor Green
-    return $false
+    if ($ok) { Write-Result 'Installed' $Name '' 'Green' }
+    else { Add-Result 'Failed' $Name "$cmd failed" }
 }
 
 $repos = @(Find-Repos -Path $rootFull -Depth $MaxDepth)
 
 if ($repos.Count -eq 0) {
     Write-Host "No git repos found under $rootFull." -ForegroundColor Yellow
+    exit 0
 }
+
+Write-Host ''
+Write-Host "Syncing $($repos.Count) $(if ($repos.Count -eq 1) { 'repo' } else { 'repos' }) under ${rootFull}:" -ForegroundColor Cyan
+Write-Host ''
 
 foreach ($d in $repos) {
     $name = Get-RelativeName $d.FullName
     $path = $d.FullName
 
     # .git not (fully) local: skip silently, nothing gets downloaded.
-    if (-not (Test-GitDirLocal -RepoPath $path)) { continue }
+    if (-not (Test-GitDirLocal -RepoPath $path)) { $offlineCount++; continue }
 
     Push-Location $path
     try {
         git fetch --quiet --prune 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[$name] git fetch FAILED (offline? auth issue?)" -ForegroundColor Red
+            Add-Result 'Failed' $name 'git fetch failed, offline or auth issue?'
             continue
         }
 
@@ -183,22 +200,23 @@ foreach ($d in $repos) {
         $defaultBranch = Get-DefaultBranch
 
         if (-not $defaultBranch) {
-            Write-Host "[$name] no default branch detected (currently on '$branch')" -ForegroundColor Yellow
+            Add-Result 'Skipped' $name "no default branch detected, currently on '$branch'"
             continue
         }
 
         if ($status) {
-            Write-Host "[$name] SKIPPED: uncommitted changes on '$branch'" -ForegroundColor Yellow
+            Add-Result 'Skipped' $name "uncommitted changes on '$branch'"
             continue
         }
 
+        $switchedFrom = $null
         if ($branch -ne $defaultBranch) {
             git checkout $defaultBranch --quiet 2>$null
             if ($LASTEXITCODE -ne 0) {
-                Write-Host "[$name] failed to check out '$defaultBranch'" -ForegroundColor Red
+                Add-Result 'Failed' $name "could not check out '$defaultBranch'"
                 continue
             }
-            Write-Host "[$name] switched from '$branch' to '$defaultBranch'" -ForegroundColor Cyan
+            $switchedFrom = $branch
         }
 
         $hadNodeModules = Test-Path (Join-Path $path "node_modules")
@@ -207,20 +225,21 @@ foreach ($d in $repos) {
         git pull --ff-only --quiet 2>$null
         $pullExit = $LASTEXITCODE
         $after = git rev-parse HEAD
-        $wasUpdated = $false
+
+        $switchNote = if ($switchedFrom) { ", was on '$switchedFrom'" } else { '' }
 
         if ($pullExit -ne 0) {
-            Write-Host "[$name] PULL FAILED on '$defaultBranch' (diverged? -> check manually)" -ForegroundColor Red
+            Add-Result 'Failed' $name "pull failed on '$defaultBranch', diverged? check manually$switchNote"
         }
         elseif ($before -ne $after) {
-            Write-Host "[$name] updated: $($before.Substring(0,7)) -> $($after.Substring(0,7))" -ForegroundColor Green
-            $wasUpdated = $true
+            Add-Result 'Updated' $name "$($before.Substring(0,7)) -> $($after.Substring(0,7))$switchNote"
+            if ($hadNodeModules -and (Test-Path (Join-Path $path "package.json"))) {
+                $npmCandidates[$name] = @{ Path = $path; Before = $before; After = $after }
+            }
         }
         else {
-            Write-Host "[$name] already up to date on '$defaultBranch'" -ForegroundColor DarkGray
+            Add-Result 'Current' $name "on '$defaultBranch'$switchNote"
         }
-
-        Install-Dependencies -Name $name -Path $path -WasUpdated $wasUpdated -HadNodeModules $hadNodeModules -InstallDeps $InstallDeps | Out-Null
 
         $mergedBranches = git branch --merged $defaultBranch 2>$null |
             ForEach-Object { $_.Trim().TrimStart('* ').Trim() } |
@@ -229,7 +248,7 @@ foreach ($d in $repos) {
         foreach ($b in $mergedBranches) {
             git branch -d $b --quiet 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[$name] deleted merged branch '$b'" -ForegroundColor DarkCyan
+                Write-Result 'Cleaned' $name "deleted merged branch '$b'" 'DarkCyan'
             }
         }
     }
@@ -238,5 +257,55 @@ foreach ($d in $repos) {
     }
 }
 
-Write-Host ""
-Write-Host "Done." -ForegroundColor White
+# npm install for the repos that were updated and already had node_modules.
+$toInstall = @()
+if ($npmCandidates.Count -gt 0) {
+    if ($InstallDeps -eq $true) {
+        $toInstall = @($npmCandidates.Keys)
+    }
+    elseif ($null -eq $InstallDeps) {
+        Write-Host ''
+        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+            Write-Host 'npm install skipped, no interactive console.' -ForegroundColor DarkGray
+        }
+        else {
+            $pick = Select-ConsoleItem -Items @($npmCandidates.Keys) -Tree `
+                -Title "npm install: updated repos with node_modules ($($npmCandidates.Count))" `
+                -Preview ${function:Get-NpmPreview}
+            if ($pick.Cancelled -or $pick.Items.Count -eq 0) {
+                Write-Host 'npm install skipped.' -ForegroundColor DarkGray
+            }
+            else {
+                $toInstall = @($pick.Items)
+            }
+        }
+    }
+}
+
+if ($toInstall.Count -gt 0) {
+    Write-Host ''
+    foreach ($n in $toInstall) {
+        Invoke-NpmInstall -Name $n -Path $npmCandidates[$n].Path
+    }
+}
+
+# Summary
+function Get-Count([string]$State) { @($results | Where-Object { $_.State -eq $State }).Count }
+
+$failed = Get-Count 'Failed'
+$skipped = Get-Count 'Skipped'
+$summary = "Updated: $(Get-Count 'Updated'), current: $(Get-Count 'Current'), skipped: $skipped, failed: $failed"
+if ($offlineCount -gt 0) { $summary += ", online-only: $offlineCount" }
+$summaryColor = if ($failed) { 'Red' } elseif ($skipped) { 'Yellow' } else { 'Green' }
+
+Write-Host ''
+Write-Host $summary -ForegroundColor $summaryColor
+
+$attention = @($results | Where-Object { $_.State -in 'Skipped', 'Failed' })
+if ($attention.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Needs attention:' -ForegroundColor Yellow
+    foreach ($r in $attention) {
+        Write-Host "  $($r.Name)  ($($r.Detail))" -ForegroundColor $r.Color
+    }
+}
