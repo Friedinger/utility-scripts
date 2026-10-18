@@ -50,7 +50,7 @@ Keys in the interactive list (entries that no longer exist are red):
 | --- | --- |
 | `↑` `↓` `PgUp` `PgDn` | move |
 | `Space` | mark / unmark |
-| `a` / `n` | mark all shown / unmark all |
+| `a` / `n` | mark all matching the filter (all without one) / unmark all |
 | `d` | mark all missing entries |
 | `p` | preview on / off (modified date and first lines of the config) |
 | `/` | live filter (`Enter` or `Esc` leaves it) |

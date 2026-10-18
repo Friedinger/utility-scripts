@@ -6,9 +6,9 @@
   Shows a scrollable list in the console. Keys:
     Up/Down, PgUp/PgDn, Home/End   move
     Space                          mark / unmark the current item
-    a                              mark all shown items (or unmark them if all are marked)
+    a                              mark all items matching the filter (or unmark them if all are marked)
     n                              unmark everything
-    d                              mark all shown flagged items (only with -Flag)
+    d                              mark all matching flagged items (only with -Flag)
     /                              live filter, Enter or Esc leaves the filter input
     Enter                          done
     Esc / q                        cancel
@@ -123,7 +123,7 @@ function Select-ConsoleItem {
             if ($cursor -ge $offset + $listRows) { $offset = $cursor - $listRows + 1 }
 
             & $line 0 $Title Cyan $null
-            $help = '[↑↓] move · [Space] mark · [a] all shown · [n] none · '
+            $help = '[↑↓] move · [Space] mark · [a] all matching · [n] none · '
             if ($flagCount -gt 0) { $help += "[d] $FlagLabel · " }
             if ($Preview) { $help += '[p] preview · ' }
             $help += '[/] filter · [Enter] done · [Esc/Ctrl+C] cancel'
@@ -162,7 +162,11 @@ function Select-ConsoleItem {
                 else { & $line (3 + $r) '' $null $null }
             }
 
-            $status = "$($selected.Count) marked · $($visible.Count) of $($items.Count) shown"
+            $first = if ($visible.Count) { $offset + 1 } else { 0 }
+            $last = [Math]::Min($offset + $listRows, $visible.Count)
+            $status = "$($selected.Count) marked · rows $first-$last of $($visible.Count) · on row $(if ($visible.Count) { $cursor + 1 } else { 0 })"
+            if ($filter) { $status += " (filter matches, $($items.Count) in total)" }
+            elseif ($last -lt $visible.Count) { $status += ' (↓ for more)' }
             if ($flagCount -gt 0) { $status += " · $flagCount $FlagLabel (red)" }
             & $line ($total - 1) $status DarkCyan $null
 
