@@ -19,7 +19,14 @@
   their original order). Needs an interactive console.
 
 .PARAMETER Items
-  The entries to choose from.
+  The entries to choose from: strings, or objects (PSCustomObject) with
+    Text    the line shown in the list (and matched by the filter)
+    Label   optional, the name shown in the tree instead of Text
+    Path    optional, the folders of the entry in the tree (string[]); without
+            it the tree is built by splitting Text at \ and /
+    Marked  optional, $true to start with the entry marked
+  Flag, Preview and Action receive the item as passed in, and the result
+  contains the marked items as passed in.
 
 .PARAMETER Title
   Header line above the list.
@@ -42,6 +49,16 @@
   to 5 lines of text. Shown below the list; toggled on and off with p (on by
   default). Results are cached per item.
 
+.PARAMETER NoFlagKey
+  Only color the flagged items red, without the d key that marks them. Use it
+  when flagged means "careful" rather than "good candidate".
+
+.PARAMETER Action
+  Extra keys, as @{ 'v' = @{ Label = 'diff'; Run = { param($item) ... } } }.
+  The key shows up in the help bar. Run gets the item under the cursor and
+  runs in the normal console (so it can open a pager); the list is redrawn
+  afterwards. Keys that are already used by the list are ignored.
+
 .EXAMPLE
   . "$PSScriptRoot\..\lib\Select-ConsoleItem.ps1"
   $r = Select-ConsoleItem -Items $paths -Flag { param($p) -not (Test-Path -LiteralPath $p) } -FlagLabel missing
@@ -52,7 +69,7 @@ function Select-ConsoleItem {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string[]]$Items,
+        [object[]]$Items,
 
         [string]$Title = 'Select items',
 
@@ -62,18 +79,41 @@ function Select-ConsoleItem {
 
         [scriptblock]$Preview,
 
-        [switch]$Tree
+        [switch]$Tree,
+
+        [hashtable]$Action,
+
+        [switch]$NoFlagKey
     )
 
     if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
         throw 'Select-ConsoleItem needs an interactive console.'
     }
 
-    $items = @($Items)
-    $flags = [bool[]]::new($items.Count)
+    # Items are strings, or objects with Text (and optionally Label, Path, Marked).
+    $source = @($Items)
+    $texts = [string[]]::new($source.Count)
+    $labels = [string[]]::new($source.Count)
+    $paths = [object[]]::new($source.Count)
+    $selected = [System.Collections.Generic.HashSet[int]]::new()
+    for ($i = 0; $i -lt $source.Count; $i++) {
+        $it = $source[$i]
+        if ($it -is [string]) {
+            $texts[$i] = $it
+        }
+        else {
+            $props = $it.PSObject.Properties
+            $texts[$i] = [string]$it.Text
+            if ($props['Label']) { $labels[$i] = [string]$it.Label }
+            if ($props['Path']) { $paths[$i] = @($it.Path) }
+            if ($props['Marked'] -and $it.Marked) { [void]$selected.Add($i) }
+        }
+    }
+
+    $flags = [bool[]]::new($texts.Count)
     if ($Flag) {
-        for ($i = 0; $i -lt $items.Count; $i++) {
-            $flags[$i] = [bool](& $Flag $items[$i])
+        for ($i = 0; $i -lt $texts.Count; $i++) {
+            $flags[$i] = [bool](& $Flag $source[$i])
         }
     }
     $flagCount = @($flags | Where-Object { $_ }).Count
@@ -82,7 +122,6 @@ function Select-ConsoleItem {
     $collapsed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $pendingIdx = -1
 
-    $selected = [System.Collections.Generic.HashSet[int]]::new()
     $filter = ''
     $filtering = $false
     $cursor = 0
@@ -96,17 +135,17 @@ function Select-ConsoleItem {
     $previewOn = [bool]$Preview
     $previewCache = @{}
     $region = if ($Preview) {
-        [Math]::Max($previewRows + 3, [Math]::Min($items.Count + $previewRows, [Console]::WindowHeight - 6))
+        [Math]::Max($previewRows + 3, [Math]::Min($texts.Count + $previewRows, [Console]::WindowHeight - 6))
     } else {
-        [Math]::Max(3, [Math]::Min($items.Count, [Console]::WindowHeight - 6))
+        [Math]::Max(3, [Math]::Min($texts.Count, [Console]::WindowHeight - 6))
     }
     $total = $region + 4
 
     function Get-Visible {
-        if ($items.Count -eq 0) { return @() }
-        if (-not $filter) { return @(0..($items.Count - 1)) }
-        @(0..($items.Count - 1) | Where-Object {
-            $items[$_].IndexOf($filter, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        if ($texts.Count -eq 0) { return @() }
+        if (-not $filter) { return @(0..($texts.Count - 1)) }
+        @(0..($texts.Count - 1) | Where-Object {
+            $texts[$_].IndexOf($filter, [StringComparison]::OrdinalIgnoreCase) -ge 0
         })
     }
 
@@ -160,15 +199,22 @@ function Select-ConsoleItem {
         if (-not $treeMode) {
             return @($visible | ForEach-Object {
                 [pscustomobject]@{
-                    Kind = 'item'; Index = $_; Text = $items[$_]; Depth = 0; Id = $null
+                    Kind = 'item'; Index = $_; Text = $texts[$_]; Depth = 0; Id = $null
                     Leaves = @($_); Open = $false; Parent = -1
                 }
             })
         }
         $root = New-TreeNode '' ''
         foreach ($idx in $visible) {
-            $segs = @($items[$idx] -split '[\\/]' | Where-Object { $_ })
-            if ($segs.Count -eq 0) { $segs = @($items[$idx]) }
+            if ($paths[$idx]) {
+                # Explicit folders (so names like feature/x are not split), the label is the entry.
+                $leafLabel = if ($labels[$idx]) { $labels[$idx] } else { $texts[$idx] }
+                $segs = @($paths[$idx]) + $leafLabel
+            }
+            else {
+                $segs = @($texts[$idx] -split '[\\/]' | Where-Object { $_ })
+                if ($segs.Count -eq 0) { $segs = @($texts[$idx]) }
+            }
             $node = $root
             $node.All.Add($idx)
             for ($s = 0; $s -lt $segs.Count - 1; $s++) {
@@ -227,10 +273,11 @@ function Select-ConsoleItem {
             # Help bar, wrapped onto two lines at a key boundary.
             $keys = [System.Collections.Generic.List[string]]::new()
             $keys.AddRange([string[]]@('[↑↓] move', '[Space] mark', '[a] all matching', '[n] none'))
-            if ($flagCount -gt 0) { $keys.Add("[d] $FlagLabel") }
+            if ($flagCount -gt 0 -and -not $NoFlagKey) { $keys.Add("[d] $FlagLabel") }
             if ($Tree -and $treeMode) { $keys.AddRange([string[]]@('[←→] fold', '[g] list')) }
             elseif ($Tree) { $keys.Add('[g] tree') }
             if ($Preview) { $keys.Add('[p] preview') }
+            if ($Action) { foreach ($ak in $Action.Keys) { $keys.Add("[$ak] $($Action[$ak].Label)") } }
             $keys.AddRange([string[]]@('[f] filter', '[Enter] done', '[Esc/Ctrl+C] cancel'))
             $help1 = ''
             $help2 = ''
@@ -277,11 +324,11 @@ function Select-ConsoleItem {
                     $pv = @("$($curRow.Leaves.Count) entries in this folder")
                 }
                 else {
-                    $cur = $items[$curRow.Index]
-                    if (-not $previewCache.ContainsKey($cur)) {
-                        $previewCache[$cur] = try { @(& $Preview $cur | Select-Object -First ($previewRows - 1)) } catch { @('(preview failed)') }
+                    $ci = $curRow.Index
+                    if (-not $previewCache.ContainsKey($ci)) {
+                        $previewCache[$ci] = try { @(& $Preview $source[$ci] | Select-Object -First ($previewRows - 1)) } catch { @('(preview failed)') }
                     }
-                    $pv = $previewCache[$cur]
+                    $pv = @($previewCache[$ci])
                 }
             }
             for ($r = $listRows; $r -lt $region; $r++) {
@@ -296,7 +343,7 @@ function Select-ConsoleItem {
             $last = [Math]::Min($offset + $listRows, $rows.Count)
             $status = "$($selected.Count) marked · rows $first-$last of $($rows.Count) · on row $(if ($rows.Count) { $cursor + 1 } else { 0 })"
             if ($treeMode) { $status += ' · tree' }
-            if ($filter) { $status += " (filter matches $($visible.Count) of $($items.Count) entries)" }
+            if ($filter) { $status += " (filter matches $($visible.Count) of $($texts.Count) entries)" }
             elseif ($last -lt $rows.Count) { $status += ' (↓ for more)' }
             if ($flagCount -gt 0) { $status += " · $flagCount $FlagLabel (red)" }
             & $line ($total - 1) $status DarkCyan $null
@@ -369,10 +416,30 @@ function Select-ConsoleItem {
                     }
                 }
                 'n' { $selected.Clear() }
-                'd' { if ($Flag) { foreach ($v in $visible) { if ($flags[$v]) { [void]$selected.Add($v) } } } }
+                'd' { if ($Flag -and -not $NoFlagKey) { foreach ($v in $visible) { if ($flags[$v]) { [void]$selected.Add($v) } } } }
                 { $_ -in "f", "/" } { $filtering = $true }
                 'p' { if ($Preview) { $previewOn = -not $previewOn } }
                 'q' { $cancelled = $true; $done = $true }
+                default {
+                    $ak = "$($key.KeyChar)".ToLowerInvariant()
+                    if ($Action -and $ak -and $Action.ContainsKey($ak) -and $rows.Count -gt 0 -and $rows[$cursor].Kind -eq 'item') {
+                        # Leave the list, run the action in the normal console (it may open a
+                        # pager), then reserve the list area again and redraw.
+                        [Console]::SetCursorPosition(0, $top + $total)
+                        [Console]::CursorVisible = $oldCursorVisible
+                        [Console]::TreatControlCAsInput = $oldCtrlC
+                        try { & $Action[$ak].Run $source[$rows[$cursor].Index] | Out-Host }
+                        catch {
+                            Write-Host "Action failed: $($_.Exception.Message)" -ForegroundColor Red
+                            Write-Host 'Press any key...' -ForegroundColor DarkGray
+                            [void][Console]::ReadKey($true)
+                        }
+                        [Console]::CursorVisible = $false
+                        [Console]::TreatControlCAsInput = $true
+                        1..$total | ForEach-Object { Write-Host '' }
+                        $top = [Console]::CursorTop - $total
+                    }
+                }
             }
             if ($done) { break }
         }
@@ -385,6 +452,6 @@ function Select-ConsoleItem {
 
     [pscustomobject]@{
         Cancelled = $cancelled
-        Items     = @($selected | Sort-Object | ForEach-Object { $items[$_] })
+        Items     = @($selected | Sort-Object | ForEach-Object { $source[$_] })
     }
 }
