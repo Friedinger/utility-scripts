@@ -219,15 +219,27 @@ function Select-ConsoleItem {
             if ($cursor -lt $offset) { $offset = $cursor }
             if ($cursor -ge $offset + $listRows) { $offset = $cursor - $listRows + 1 }
 
-            & $line 0 $Title Cyan $null
-            $help = '[↑↓] move · [Space] mark · [a] all matching · [n] none · '
-            if ($flagCount -gt 0) { $help += "[d] $FlagLabel · " }
-            if ($Tree) { $help += if ($treeMode) { '[←→] fold · [g] list · ' } else { '[g] tree · ' } }
-            if ($Preview) { $help += '[p] preview · ' }
-            $help += '[f] filter · [Enter] done · [Esc/Ctrl+C] cancel'
-            & $line 1 $help DarkGray $null
-            $filterText = if ($filtering) { "filter: $filter▏" } elseif ($filter) { "filter: $filter  (f to edit)" } else { '' }
-            & $line 2 $filterText Yellow $null
+            # The filter lives in the title line, so the header needs no extra row.
+            $titleText = $Title
+            if ($filtering) { $titleText += "   filter: $filter▏" }
+            elseif ($filter) { $titleText += "   filter: $filter  (f to edit)" }
+            & $line 0 $titleText Cyan $null
+            # Help bar, wrapped onto two lines at a key boundary.
+            $keys = [System.Collections.Generic.List[string]]::new()
+            $keys.AddRange([string[]]@('[↑↓] move', '[Space] mark', '[a] all matching', '[n] none'))
+            if ($flagCount -gt 0) { $keys.Add("[d] $FlagLabel") }
+            if ($Tree -and $treeMode) { $keys.AddRange([string[]]@('[←→] fold', '[g] list')) }
+            elseif ($Tree) { $keys.Add('[g] tree') }
+            if ($Preview) { $keys.Add('[p] preview') }
+            $keys.AddRange([string[]]@('[f] filter', '[Enter] done', '[Esc/Ctrl+C] cancel'))
+            $help1 = ''
+            $help2 = ''
+            foreach ($hk in $keys) {
+                if (-not $help2 -and ($help1.Length + $hk.Length + 3) -le $width) { $help1 += $(if ($help1) { ' · ' } else { '' }) + $hk }
+                else { $help2 += $(if ($help2) { ' · ' } else { '' }) + $hk }
+            }
+            & $line 1 $help1 DarkGray $null
+            & $line 2 $help2 DarkGray $null
 
             for ($r = 0; $r -lt $listRows; $r++) {
                 $vi = $offset + $r
