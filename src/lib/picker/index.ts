@@ -4,12 +4,13 @@
  *
  * Keys: ↑↓ PgUp PgDn Home End move · Space mark · a all matching · n none ·
  * d all flagged · g list/tree · ←→ fold · p preview · f or / filter ·
- * Enter done · Esc, q or Ctrl+C cancel.
+ * Enter done · Esc, q or Ctrl+C cancel, plus the caller's action keys.
  */
 import { emitKeypressEvents } from "node:readline";
-import { paint } from "../term.ts";
+import { ask, paint } from "../term.ts";
 import {
   type Key,
+  type KeyResult,
   type Line,
   type PickerItem,
   PickerState,
@@ -17,6 +18,15 @@ import {
 } from "./state.ts";
 
 export type { PickerItem } from "./state.ts";
+
+export interface PickAction<T> {
+  label: string;
+  /**
+   * Runs for the entry under the cursor, in the normal terminal (so it can
+   * open a pager); the list is drawn again afterwards.
+   */
+  run: (item: T) => void | Promise<void>;
+}
 
 export interface PickOptions<T> {
   items: T[];
@@ -29,8 +39,12 @@ export interface PickOptions<T> {
   noFlagKey?: boolean;
   /** Allow switching to a folder tree with `g`. */
   tree?: boolean;
+  /** Start in the folder tree (needs `tree`). */
+  startInTree?: boolean;
   /** Up to five lines about the item under the cursor. Cached per item. */
   preview?: (item: T) => string[];
+  /** Extra single-letter keys; keys the list uses itself are ignored. */
+  actions?: Record<string, PickAction<T>>;
 }
 
 export interface PickResult<T> {
@@ -47,6 +61,7 @@ export async function pick<T>(options: PickOptions<T>): Promise<PickResult<T>> {
     throw new Error("The list needs an interactive terminal.");
 
   const describe = options.describe ?? ((item: T) => ({ text: String(item) }));
+  const actions = options.actions ?? {};
   const state = new PickerState({
     items: options.items.map(describe),
     title: options.title,
@@ -54,7 +69,12 @@ export async function pick<T>(options: PickOptions<T>): Promise<PickResult<T>> {
     ...(options.flagLabel !== undefined && { flagLabel: options.flagLabel }),
     noFlagKey: Boolean(options.noFlagKey),
     tree: Boolean(options.tree),
+    startInTree: Boolean(options.startInTree),
     preview: Boolean(options.preview),
+    actions: Object.entries(actions).map(([key, a]) => ({
+      key,
+      label: a.label,
+    })),
   });
 
   const previewCache = new Map<number, string[]>();
@@ -87,16 +107,26 @@ export async function pick<T>(options: PickOptions<T>): Promise<PickResult<T>> {
     );
   };
 
-  // Reserve the region; the cursor stays on the line below it between draws.
-  stdout.write("\n".repeat(total) + `${ESC}?25l`);
+  // enter() reserves the region (the cursor stays on the line below it
+  // between draws) and takes over the keyboard; leave() hands both back.
   emitKeypressEvents(stdin);
   const wasRaw = stdin.isRaw;
-  stdin.setRawMode(true);
-  stdin.resume();
-
-  try {
+  const enter = (): void => {
+    stdout.write("\n".repeat(total) + `${ESC}?25l`);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdout.on("resize", draw);
     draw();
-    const outcome = await new Promise<"done" | "cancel">((resolve) => {
+  };
+  const leave = (): void => {
+    stdout.off("resize", draw);
+    stdin.setRawMode(wasRaw);
+    stdin.pause();
+    stdout.write(`${ESC}?25h`);
+  };
+
+  const nextResult = (): Promise<KeyResult> =>
+    new Promise((resolve) => {
       const onKey = (
         char: string | undefined,
         key: KeypressKey | undefined,
@@ -104,26 +134,41 @@ export async function pick<T>(options: PickOptions<T>): Promise<PickResult<T>> {
         const result = state.handleKey(toKey(char, key), region);
         if (result) {
           stdin.off("keypress", onKey);
-          stdout.off("resize", draw);
           resolve(result);
         } else {
           draw();
         }
       };
       stdin.on("keypress", onKey);
-      stdout.on("resize", draw);
     });
-    return {
-      cancelled: outcome === "cancel",
-      items:
-        outcome === "cancel"
-          ? []
-          : state.result().map((i) => options.items[i]!),
-    };
+
+  enter();
+  try {
+    for (;;) {
+      const result = await nextResult();
+      if (result === "done" || result === "cancel") {
+        return {
+          cancelled: result === "cancel",
+          items:
+            result === "cancel"
+              ? []
+              : state.result().map((i) => options.items[i]!),
+        };
+      }
+      if (!result) continue;
+      leave();
+      try {
+        await actions[result.action]!.run(options.items[result.index]!);
+      } catch (error) {
+        stdout.write(
+          paint("red", `Action failed: ${(error as Error).message}`) + "\n",
+        );
+        await ask(paint("gray", "Press Enter to go back to the list..."));
+      }
+      enter();
+    }
   } finally {
-    stdin.setRawMode(wasRaw);
-    stdin.pause();
-    stdout.write(`${ESC}?25h`);
+    leave();
   }
 }
 

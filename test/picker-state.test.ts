@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type KeyResult,
   type PickerConfig,
   PickerState,
   regionHeight,
@@ -23,7 +24,7 @@ function picker(extra: Partial<PickerConfig> = {}): PickerState {
 }
 
 const REGION = 10;
-const press = (s: PickerState, ...keys: string[]): (string | undefined)[] =>
+const press = (s: PickerState, ...keys: string[]): KeyResult[] =>
   keys.map((k) =>
     s.handleKey(k.length === 1 ? { char: k } : { name: k }, REGION),
   );
@@ -145,6 +146,40 @@ describe("PickerState tree", () => {
     });
     press(s, "g");
     expect(s.rows()[0]?.text).toBe(String.raw`C:\x`);
+  });
+});
+
+describe("PickerState actions", () => {
+  it("returns the action for the entry under the cursor", () => {
+    const s = picker({ actions: [{ key: "v", label: "diff" }] });
+    expect(press(s, "down", "v")).toEqual([
+      undefined,
+      { action: "v", index: 1 },
+    ]);
+    expect(press(s, "V")).toEqual([{ action: "v", index: 1 }]);
+  });
+
+  it("ignores actions on keys the list uses and on folders", () => {
+    const s = picker({
+      tree: true,
+      startInTree: true,
+      actions: [
+        { key: "a", label: "taken" },
+        { key: "v", label: "diff" },
+      ],
+    });
+    expect(s.actions.map((a) => a.key)).toEqual(["v"]);
+    expect(s.rows()[0]?.kind).toBe("dir");
+    expect(press(s, "v")).toEqual([undefined]);
+  });
+
+  it("lists the actions in the help", () => {
+    const s = picker({ actions: [{ key: "v", label: "full diff" }] });
+    const help = s
+      .view(REGION, 300, () => [])
+      .slice(1, 3)
+      .map((l) => l.text);
+    expect(help.join(" ")).toContain("[v] full diff");
   });
 });
 

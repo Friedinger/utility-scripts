@@ -29,9 +29,20 @@ export interface PickerConfig {
   tree?: boolean;
   /** Whether there is a preview (toggled with `p`, on by default). */
   preview?: boolean;
+  /** Start in the folder tree instead of the flat list (needs `tree`). */
+  startInTree?: boolean;
+  /** Extra keys that run something for the entry under the cursor. */
+  actions?: { key: string; label: string }[];
   /** Fold folder names that only differ in case. Defaults to the platform. */
   caseInsensitive?: boolean;
 }
+
+/** What a key press asks the list to do. */
+export type KeyResult =
+  "done" | "cancel" | { action: string; index: number } | undefined;
+
+/** Keys the list uses itself; actions on them are ignored. */
+const RESERVED_KEYS = new Set([" ", "a", "n", "d", "g", "p", "f", "/", "q"]);
 
 export interface Row {
   kind: "item" | "dir";
@@ -76,6 +87,7 @@ export class PickerState {
   readonly treeAllowed: boolean;
   readonly hasPreview: boolean;
   readonly caseInsensitive: boolean | undefined;
+  readonly actions: { key: string; label: string }[];
   /** Separator used when folder names are joined for display. */
   readonly sep: string;
 
@@ -106,6 +118,10 @@ export class PickerState {
     this.hasPreview = Boolean(config.preview);
     this.previewOn = this.hasPreview;
     this.caseInsensitive = config.caseInsensitive;
+    this.treeMode = this.treeAllowed && Boolean(config.startInTree);
+    this.actions = (config.actions ?? []).filter(
+      (a) => a.key.length === 1 && !RESERVED_KEYS.has(a.key.toLowerCase()),
+    );
     this.sep = this.texts.some((t) => t.includes("\\")) ? "\\" : "/";
   }
 
@@ -244,9 +260,9 @@ export class PickerState {
 
   /**
    * Applies one key. Returns "done" or "cancel" when the list should close,
-   * otherwise undefined.
+   * an action for an action key on an entry, otherwise undefined.
    */
-  handleKey(key: Key, region: number): "done" | "cancel" | undefined {
+  handleKey(key: Key, region: number): KeyResult {
     if (key.ctrl && key.name === "c") return "cancel";
     const visible = this.visible();
     const rows = this.rows(visible);
@@ -338,6 +354,10 @@ export class PickerState {
         return;
       case "q":
         return "cancel";
+    }
+    const action = key.char?.toLowerCase();
+    if (row?.kind === "item" && this.actions.some((a) => a.key === action)) {
+      return { action: action!, index: row.index };
     }
     return;
   }
@@ -431,6 +451,7 @@ export class PickerState {
     if (this.treeAllowed)
       keys.push(...(this.treeMode ? ["[←→] fold", "[g] list"] : ["[g] tree"]));
     if (this.hasPreview) keys.push("[p] preview");
+    for (const a of this.actions) keys.push(`[${a.key}] ${a.label}`);
     keys.push("[f] filter", "[Enter] done", "[Esc/Ctrl+C] cancel");
     return keys;
   }
