@@ -23,9 +23,17 @@ npm link
 `npm install` when dependencies changed).
 
 If Node comes from mise, `npm link` installs the commands into mise's folder
-for that Node version, so run `mise reshim` afterwards to get shims for them.
-After a Node update (new version in `mise.toml`, then `mise install`), run
-`npm link` and `mise reshim` again.
+for the Node version it runs with, and the shims only find them while that is
+the version in use. Inside the repo that is the version pinned in `mise.toml`,
+so link with your global Node instead (`lts` here, use whatever your global
+mise config requests) and create the shims:
+
+```sh
+mise exec node@lts -- npm link
+mise reshim
+```
+
+Repeat both when your global Node version changes.
 
 ## [mise-forget](src/mise-forget/README.md)
 
