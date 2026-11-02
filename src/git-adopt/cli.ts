@@ -37,7 +37,7 @@ Options:
   -y, --yes             no list, no question: adopt the pre-marked commits
       --push            push with --force-with-lease afterwards without asking
       --no-push         never push
-  -h, --help            show this help
+  -h, --help            show this help (as "git adopt", only -h works)
 
 Pre-marked are the commits where you are not the author or committer (your
 identity comes from user.name and user.email).`;

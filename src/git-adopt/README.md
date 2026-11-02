@@ -90,5 +90,6 @@ git adopt --yes --push
 git adopt --base origin/feature/first-part
 ```
 
-`git adopt --help` lists all options. Without a terminal, `--yes` (or
+`git adopt -h` (or `git-adopt --help`) lists all options; `git adopt --help`
+looks for a Git manual page instead, which does not exist. Without a terminal, `--yes` (or
 `--dry-run`) is required.
