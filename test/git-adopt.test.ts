@@ -108,7 +108,7 @@ const claude = (...m: string[]): string =>
   commit(work, CLAUDE, claudeKey, ...m);
 
 const field = (rev: string, format: string): string =>
-  g(work, "log", "-1", `--format=${format}`, rev);
+  g(work, "log", "--no-show-signature", "-1", `--format=${format}`, rev);
 const rawMessage = (rev: string): string => {
   const raw = execFileSync("git", ["cat-file", "commit", rev], {
     cwd: work,
@@ -293,6 +293,24 @@ describe.skipIf(!canSign)("rewriting", () => {
     // Working tree untouched, old state kept in the backup ref.
     expect(g(work, "status", "--porcelain")).toBe("");
     expect(g(work, "rev-parse", "refs/adopt/backup/feature")).toBe(oldHead);
+  });
+
+  it("reads the commits with log.showSignature on", () => {
+    claude("one");
+    g(work, "config", "log.showSignature", "true");
+    const info = inspect(work);
+    expect(info.commits.map((c) => c.hash)).toEqual(hashes());
+    adoptAll();
+    expect(field("HEAD", "%ae")).toBe(ME.email);
+  });
+
+  it("does not move the branch when the backup ref cannot be written", () => {
+    claude("one");
+    const head = g(work, "rev-parse", "HEAD");
+    // refs/adopt/backup/feature/x makes refs/adopt/backup/feature a folder.
+    g(work, "update-ref", "refs/adopt/backup/feature/x", head);
+    expect(() => adoptAll()).toThrow(/nothing changed/);
+    expect(g(work, "rev-parse", "HEAD")).toBe(head);
   });
 
   it("changes nothing on a second run", () => {

@@ -201,6 +201,8 @@ export function listCommits(repo: string, range: string): Commit[] {
   return git(
     repo,
     "log",
+    // log.showSignature would mix the signature check into the output.
+    "--no-show-signature",
     "--topo-order",
     "--reverse",
     `--format=${format}`,
@@ -362,6 +364,19 @@ export function moveBranch(
   oldHead: string,
   newHead: string,
 ): void {
+  // Backup first, so the undo hint never points to a ref that is missing.
+  const backup = git(
+    repo,
+    "update-ref",
+    "-m",
+    "git-adopt",
+    backupRef(branch),
+    oldHead,
+  );
+  if (!backup.ok)
+    throw new Error(
+      `Could not create ${backupRef(branch)}, nothing changed: ${backup.err}`,
+    );
   const moved = git(
     repo,
     "update-ref",
@@ -375,7 +390,6 @@ export function moveBranch(
     throw new Error(
       `Could not move '${branch}': ${moved.err || "it changed meanwhile"}`,
     );
-  git(repo, "update-ref", "-m", "git-adopt", backupRef(branch), oldHead);
 }
 
 /**

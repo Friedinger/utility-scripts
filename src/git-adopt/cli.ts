@@ -232,6 +232,7 @@ function preview(repo: string, c: Commit): string[] {
   const [sig = "N", signer = "", key = ""] = git(
     repo,
     "log",
+    "--no-show-signature",
     "-1",
     "--format=%G?%x1f%GS%x1f%GK",
     c.hash,
