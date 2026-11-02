@@ -208,6 +208,11 @@ export function createSandbox(path: string): string {
     });
   }
 
+  // Relative remote URLs (resolved from each clone's folder), so a copy of
+  // the sandbox fetches from its own remotes, not from the original's.
+  for (const name of REPOS)
+    g(repo(name), "remote", "set-url", "origin", `../../remotes/${name}.git`);
+
   return join(path, "root");
 }
 

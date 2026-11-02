@@ -1,9 +1,25 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { git } from "../src/lib/git.ts";
 import { findRepos } from "../src/sync-git-repos/repos.ts";
 import {
@@ -25,12 +41,25 @@ const cli = fileURLToPath(
   new URL("../src/sync-git-repos/cli.ts", import.meta.url),
 );
 
+let template: string;
 let root: string;
 let env: NodeJS.ProcessEnv;
 
+// Building the sandbox takes a few hundred git calls, which is slow on
+// Windows. Build it once and give every test its own copy of the folder.
+beforeAll(() => {
+  template = join(mkdtempSync(join(tmpdir(), "sync-template-")), SANDBOX_NAME);
+  createSandbox(template);
+}, 120_000);
+
+afterAll(() => {
+  rmSync(dirname(template), { recursive: true, force: true, maxRetries: 5 });
+});
+
 beforeEach(async () => {
   const sandbox = join(await tempDir(), SANDBOX_NAME);
-  root = createSandbox(sandbox);
+  cpSync(template, sandbox, { recursive: true });
+  root = join(sandbox, "root");
   env = isolatedGitEnv(sandbox);
   // The code under test runs git in this process too.
   for (const [k, v] of Object.entries(env))
@@ -40,7 +69,7 @@ beforeEach(async () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   };
-}, 60_000);
+});
 
 const repo = (name: string): string => join(root, name);
 const head = (name: string, ref = "HEAD"): string =>
