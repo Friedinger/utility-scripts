@@ -1,7 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { git, gitAsync, gitInteractive } from "../lib/git.ts";
+import {
+  detectDefaultBranch,
+  git,
+  gitAsync,
+  gitInteractive,
+} from "../lib/git.ts";
 import { type Color, say } from "../lib/term.ts";
 
 export type ResultState = "updated" | "current" | "skipped" | "failed";
@@ -550,19 +555,6 @@ export async function fetchAll(
     Array.from({ length: Math.min(parallel, repos.length) }, worker),
   );
   return ok;
-}
-
-/** The repo's actual default branch, via origin/HEAD; falls back to main or master. */
-export function detectDefaultBranch(path: string): string | undefined {
-  let ref = git(path, "symbolic-ref", "refs/remotes/origin/HEAD");
-  if (!ref.ok) {
-    git(path, "remote", "set-head", "origin", "-a");
-    ref = git(path, "symbolic-ref", "refs/remotes/origin/HEAD");
-  }
-  if (ref.ok && ref.out) return ref.out.replace(/^refs\/remotes\/origin\//, "");
-  return ["main", "master"].find(
-    (b) => git(path, "show-ref", "--verify", "--quiet", `refs/heads/${b}`).ok,
-  );
 }
 
 /** Files with local changes: modified, staged and untracked (repo-relative, forward slashes). */
