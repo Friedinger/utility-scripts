@@ -11,6 +11,16 @@ export interface GitResult {
 // Paths with umlauts etc. come out as they are instead of octal-escaped.
 const BASE = ["-c", "core.quotepath=false"];
 
+// No credential prompts for the non-interactive calls: a repo that needs a
+// login fails (reported as a failed fetch) instead of blocking the run, where
+// several parallel fetches would otherwise prompt into the same terminal.
+const QUIET_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_ASKPASS: "",
+  GCM_INTERACTIVE: "never",
+};
+
 function result(ok: boolean, stdout: string): GitResult {
   const out = stdout.trimEnd();
   return { ok, out, lines: out.split(/\r?\n/).filter(Boolean) };
@@ -20,6 +30,7 @@ function result(ok: boolean, stdout: string): GitResult {
 export function git(cwd: string, ...args: string[]): GitResult {
   const r = spawnSync("git", [...BASE, ...args], {
     cwd,
+    env: QUIET_ENV,
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
@@ -34,7 +45,7 @@ export function gitAsync(cwd: string, ...args: string[]): Promise<GitResult> {
     execFile(
       "git",
       [...BASE, ...args],
-      { cwd, encoding: "utf8", windowsHide: true },
+      { cwd, env: QUIET_ENV, encoding: "utf8", windowsHide: true },
       (error, stdout) => {
         if (error && typeof error.code !== "number") reject(error);
         else resolve(result(!error, stdout));
