@@ -1,0 +1,43 @@
+{
+  "name": "utility-scripts",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Small utility scripts for the gaps my usual tools leave behind",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Friedinger/utility-scripts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Friedinger/utility-scripts/issues"
+  },
+  "homepage": "https://github.com/Friedinger/utility-scripts#readme",
+  "author": "Friedinger",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "type": "module",
+  "bin": {
+    "mise-forget": "src/mise-forget/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc",
+    "lint": "prettier . --check && eslint . && tsc",
+    "fix": "prettier . --write && eslint . --fix"
+  },
+  "dependencies": {
+    "trash": "10.1.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.6",
+    "@vitest/coverage-v8": "5.0.5",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5"
+  }
+}
