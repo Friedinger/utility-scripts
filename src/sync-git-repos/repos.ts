@@ -49,6 +49,8 @@ function oneDriveRoots(): string[] {
 // content is not on disk. Reads the repo paths from stdin and prints those
 // where the folder or anything in .git is such a placeholder.
 const CLOUD_CHECK = String.raw`
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $mask = 0x1000 -bor 0x40000 -bor 0x400000
 foreach ($p in [Console]::In.ReadToEnd() -split "\r?\n") {
   if (-not $p) { continue }
