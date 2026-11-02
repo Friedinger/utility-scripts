@@ -18,13 +18,15 @@
   },
   "type": "module",
   "bin": {
-    "mise-forget": "src/mise-forget/cli.ts"
+    "mise-forget": "src/mise-forget/cli.ts",
+    "sync-git-repos": "src/sync-git-repos/cli.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc",
     "lint": "prettier . --check && eslint . && tsc",
-    "fix": "prettier . --write && eslint . --fix"
+    "fix": "prettier . --write && eslint . --fix",
+    "sandbox": "node test/sync-sandbox.ts"
   },
   "dependencies": {
     "trash": "10.1.1"
