@@ -111,7 +111,13 @@ async function main(argv: string[]): Promise<number> {
         preview,
         actions: { v: { label: "full diff", run: showDiff } },
       });
-      if (result.cancelled) say("Review cancelled, nothing changed.", "gray");
+      if (result.cancelled)
+        say(
+          run.length
+            ? "Review cancelled, only the entries set by options run."
+            : "Review cancelled, nothing changed.",
+          "gray",
+        );
       else run.push(...result.items);
     }
   }
