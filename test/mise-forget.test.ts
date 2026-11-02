@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { lstat, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, lstat, readdir, rm, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  findStateDir,
   forget,
   isMissing,
   matchPatterns,
@@ -212,5 +213,34 @@ describe("mise-forget cli", () => {
     const { code, out } = await run("--help");
     expect(code).toBe(0);
     expect(out).toContain("Usage: mise-forget");
+  });
+});
+
+// A fake mise script on PATH; shell scripts only run like this outside Windows.
+describe.skipIf(process.platform === "win32")("findStateDir", () => {
+  async function fakeMise(script: string): Promise<void> {
+    const bin = await tempDir();
+    const file = join(bin, "mise");
+    await writeFile(file, `#!/bin/sh\n${script}\n`);
+    await chmod(file, 0o755);
+    vi.stubEnv("PATH", bin + delimiter + process.env.PATH);
+  }
+
+  it("reads the state folder from mise doctor", async () => {
+    await fakeMise(`echo '{"dirs":{"state":"/s"}}'`);
+    expect(await findStateDir()).toBe(join("/s", "tracked-configs"));
+    vi.unstubAllEnvs();
+  });
+
+  it("still uses the JSON when mise doctor reports problems", async () => {
+    await fakeMise(`echo '{"dirs":{"state":"/s"}}'; exit 1`);
+    expect(await findStateDir()).toBe(join("/s", "tracked-configs"));
+    vi.unstubAllEnvs();
+  });
+
+  it("fails without output", async () => {
+    await fakeMise("exit 1");
+    await expect(findStateDir()).rejects.toThrow("mise doctor --json failed");
+    vi.unstubAllEnvs();
   });
 });

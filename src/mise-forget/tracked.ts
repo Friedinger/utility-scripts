@@ -25,11 +25,15 @@ export async function findStateDir(): Promise<string> {
       maxBuffer: 16 * 1024 * 1024,
     }));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+    const failure = error as NodeJS.ErrnoException & { stdout?: string };
+    if (failure.code === "ENOENT")
       throw new Error("mise not found on PATH.", { cause: error });
-    throw new Error(`mise doctor --json failed: ${(error as Error).message}`, {
-      cause: error,
-    });
+    // mise doctor exits 1 as soon as it finds any problem, but still prints the JSON.
+    if (!failure.stdout?.trim())
+      throw new Error(`mise doctor --json failed: ${failure.message}`, {
+        cause: error,
+      });
+    stdout = failure.stdout;
   }
   const state = (JSON.parse(stdout) as { dirs?: { state?: string } }).dirs
     ?.state;
