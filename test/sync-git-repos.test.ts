@@ -149,6 +149,16 @@ describe("step 1: sync", () => {
     );
   });
 
+  it("deletes branches merged into main even when they are not in HEAD", async () => {
+    // A finished branch with no upstream that is in the updated main, but not
+    // in the checked-out work branch: git branch -d would refuse it.
+    git(repo("wip-branch"), "fetch", "--quiet");
+    git(repo("wip-branch"), "branch", "--no-track", "done", "origin/main");
+    const sync = await syncAll();
+    expect(branches("wip-branch")).toEqual(["main", "wip2"]);
+    expect(sync.results.filter((r) => r.state === "failed")).toEqual([]);
+  });
+
   it("reports a failed fetch", async () => {
     const sync = new Sync(root);
     sync.syncRepo(repo("behind"), false);

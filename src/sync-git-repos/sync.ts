@@ -279,7 +279,9 @@ export class Sync {
         "--format=%(refname:short)",
       ).lines.filter(isFree),
     );
-    for (const b of merged) this.deleteBranch(path, name, b, "-d");
+    // -D: --merged already checked them against the default branch, while -d
+    // would check against HEAD or a (possibly pruned) upstream instead.
+    for (const b of merged) this.deleteBranch(path, name, b, "-D");
 
     let currentInDefault = false;
     if (!onDefault && branch !== "HEAD") {
@@ -596,11 +598,13 @@ function installDeps(sync: Sync, name: string, path: string): void {
     : ["install"];
   line("Installing", name, `npm ${args[0]}`, "cyan");
   // npm is a .cmd script on Windows, which only runs through a shell.
-  const r = spawnSync("npm", [...args, "--silent"], {
-    cwd: path,
-    stdio: "ignore",
-    shell: process.platform === "win32",
-  });
+  // With a shell the command is one string (args plus shell is deprecated);
+  // the arguments are fixed here, so nothing needs quoting.
+  const opts = { cwd: path, stdio: "ignore" as const };
+  const r =
+    process.platform === "win32"
+      ? spawnSync(`npm ${args[0]} --silent`, { ...opts, shell: true })
+      : spawnSync("npm", [...args, "--silent"], opts);
   if (r.status === 0) line("Installed", name, "", "green");
   else sync.add("failed", name, `npm ${args[0]} failed`);
 }
