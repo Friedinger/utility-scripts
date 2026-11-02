@@ -1,0 +1,15 @@
+name: Sync labels
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"
+  push:
+    branches: [main]
+    paths: [.github/workflows/sync-labels.yml]
+  workflow_dispatch:
+
+jobs:
+  run:
+    uses: Friedinger/configs/.github/workflows/action-sync-labels.yml@ae5fcfba4248a2d009011c6ccc3160e24806d98f # v1.5.0
+    permissions:
+      issues: write
