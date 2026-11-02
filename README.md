@@ -35,6 +35,17 @@ mise reshim
 
 Repeat both when your global Node version changes.
 
+## [git-adopt](src/git-adopt/README.md)
+
+When an AI agent builds a branch in the cloud, its commits carry the agent as
+author and are signed with the cloud's key. Taking them over means rewriting
+author and signature, without touching the commits that are already yours.
+
+`git adopt` lists the branch's commits with the foreign ones pre-marked,
+makes you the author, signs them with your key and pushes with
+`--force-with-lease`. Trees stay as they are, so there are no conflicts and
+merge commits survive; commits before the first foreign one keep their hash.
+
 ## [mise-forget](src/mise-forget/README.md)
 
 [mise](https://mise.jdx.dev) remembers every config file it has ever seen, so

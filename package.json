@@ -18,6 +18,7 @@
   },
   "type": "module",
   "bin": {
+    "git-adopt": "src/git-adopt/cli.ts",
     "mise-forget": "src/mise-forget/cli.ts",
     "sync-git-repos": "src/sync-git-repos/cli.ts"
   },
