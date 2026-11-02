@@ -16,18 +16,18 @@ gets one result line (`Updated`, `Up to date`, `Skipped`, `Failed`).
 **2. Review, one list.** Everything that needs a decision is collected into a
 single folder tree, grouped by repo, with the sensible entries already marked:
 
-| Entry | Pre-marked |
-| --- | --- |
-| Delete a branch whose changes are already in the default branch (squash or rebase merged) | yes |
-| Switch to the default branch and delete the current branch, because it is done | yes |
-| Delete a branch whose upstream is gone but which has commits not in the default branch | no, red |
-| Switch to the default branch, leaving a branch with unmerged work | no |
-| Reset a diverged default branch to origin (local commits go to a `backup/...` branch) | no, red |
-| Stash local changes, update, restore them (when they touch incoming files) | no |
-| `npm install` for updated repos that already had `node_modules` | no |
+| Entry                                                                                     | Pre-marked |
+| ----------------------------------------------------------------------------------------- | ---------- |
+| Delete a branch whose changes are already in the default branch (squash or rebase merged) | yes        |
+| Switch to the default branch and delete the current branch, because it is done            | yes        |
+| Delete a branch whose upstream is gone but which has commits not in the default branch    | no, red    |
+| Switch to the default branch, leaving a branch with unmerged work                         | no         |
+| Reset a diverged default branch to origin (local commits go to a `backup/...` branch)     | no, red    |
+| Stash local changes, update, restore them (when they touch incoming files)                | no         |
+| `npm install` for updated repos that already had `node_modules`                           | no         |
 
 The keys are the same as in
-[Remove-MiseTrackedConfig](../mise-tracked-configs/README.md#the-interactive-list),
+[mise-forget](../src/mise-forget/README.md#the-interactive-list),
 plus `v` for the full diff of the entry under the cursor (in git's pager).
 
 **3. Run and summary.** The marked entries run, then a summary counts the
