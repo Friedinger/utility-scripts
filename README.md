@@ -22,6 +22,11 @@ npm link
 `npm link` puts the commands on your `PATH`. To update, `git pull` (and
 `npm install` when dependencies changed).
 
+If Node comes from mise, `npm link` installs the commands into mise's folder
+for that Node version, so run `mise reshim` afterwards to get shims for them.
+After a Node update (new version in `mise.toml`, then `mise install`), run
+`npm link` and `mise reshim` again.
+
 ## [mise-forget](src/mise-forget/README.md)
 
 [mise](https://mise.jdx.dev) remembers every config file it has ever seen, so
