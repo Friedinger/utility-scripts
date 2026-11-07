@@ -1,0 +1,11 @@
+name: Enforce conventions
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  run:
+    uses: Friedinger/configs/.github/workflows/action-conventions.yml@ae5fcfba4248a2d009011c6ccc3160e24806d98f # v1.5.0
+    permissions:
+      pull-requests: write
