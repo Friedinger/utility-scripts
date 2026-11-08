@@ -13,7 +13,7 @@ permissions: {}
 
 jobs:
   run:
-    uses: Friedinger/configs/.github/workflows/action-sync-webhook.yml@ae5fcfba4248a2d009011c6ccc3160e24806d98f # v1.5.0
+    uses: Friedinger/configs/.github/workflows/action-sync-webhook.yml@bebbf14f4d4cc08abfc751b1c44378ab0da613aa # v1.5.1
     secrets:
       WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
       WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
