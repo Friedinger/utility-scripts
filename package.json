@@ -1,5 +1,5 @@
 {
-  "name": "utility-scripts",
+  "name": "@friedinger/utility-scripts",
   "private": true,
   "version": "0.0.0",
   "description": "Small utility scripts for the gaps my usual tools leave behind",
